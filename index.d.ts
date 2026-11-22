@@ -1,0 +1,118 @@
+import type { Tool, ToolSet, ToolApprovalStatus, GenericToolApprovalFunction, ToolApprovalConfiguration } from "ai";
+
+/** Options every call to alalanet takes. */
+export interface AlalanetCallOptions {
+  /** default https://alalanet.com; a token or a device key goes over plain http only to this machine */
+  api?: string;
+  /** a plan's token, sent as Authorization: Bearer (default: process.env.ALALANET_TOKEN) */
+  token?: string;
+  /** a free device key (POST /v1/device-keys) for the install hook's own checks a day (default: process.env.ALALANET_DEVICE_KEY) */
+  deviceKey?: string;
+  /** per request to alalanet, default 20000 */
+  timeoutMs?: number;
+  fetch?: typeof globalThis.fetch;
+  /** put in front of this package's User-Agent */
+  userAgent?: string;
+}
+
+/** What to send to preflight for one payment tool call. */
+export interface PaymentToCheck {
+  url: string;
+  /** the 402's PAYMENT-REQUIRED header value or JSON body; without it alalanet judges the terms it last observed at url */
+  paymentRequired?: string | object;
+  /** budget for this one call, in US dollars */
+  maxUsd?: number;
+  /** your x402 client library@version (known flaws come back in client_advisories) */
+  client?: string;
+}
+
+export interface AlalanetDecision {
+  kind: "command" | "payment";
+  toolName: string;
+  toolCallId: string;
+  /** command: allow | deny | ask; payment: allow | hold | block | unchecked */
+  decision: string;
+  reason?: string;
+  reasons?: string[];
+  url?: string;
+  checked?: boolean;
+  notChecked?: string;
+}
+
+export interface AlalanetApprovalOptions extends AlalanetCallOptions {
+  /** tool names that are shells (replaces DEFAULT_SHELL_TOOLS), or { name: (input) => command line(s) } */
+  shellTools?: string[] | Record<string, (input: any) => string | string[] | undefined | Promise<string | string[] | undefined>>;
+  /** any tool whose input has a string `command` counts as a shell (default true) */
+  detectCommandInput?: boolean;
+  /** send only lines that may install or run something (mayInstall); false sends every command (default true) */
+  prefilter?: boolean;
+  /** tools that pay: names (input.url is read), or { name: (input) => url | PaymentToCheck } */
+  paymentTools?: string[] | Record<string, (input: any) => string | PaymentToCheck | undefined | Promise<string | PaymentToCheck | undefined>>;
+  /** max_usd sent to preflight for a payment tool call */
+  maxUsdPerCall?: number;
+  /** "ask" (default): a hold waits for the user; "deny": a hold is denied */
+  onHold?: "ask" | "deny";
+  /** "ask" (default): when alalanet could not check, the user decides; "deny": denied. Never allowed. */
+  onUnchecked?: "ask" | "deny";
+  /** your own toolApproval (a per-tool map or a function); the strictest of it, the tool's needsApproval and alalanet's wins */
+  fallback?: ToolApprovalConfiguration<any, any>;
+  /** every verdict */
+  onDecision?: (d: AlalanetDecision) => void;
+}
+
+/** The AI SDK's GenericToolApprovalFunction: pass it as toolApproval to ToolLoopAgent, generateText or streamText. */
+export type AlalanetApproval = GenericToolApprovalFunction<any, any, any>;
+
+export function alalanetApproval(opts?: AlalanetApprovalOptions): AlalanetApproval;
+
+/** The tool names treated as a shell by default. */
+export const DEFAULT_SHELL_TOOLS: string[];
+
+/** The command lines in a shell tool's input: command (string or argv), commands, cmd, and the same under action. */
+export function commandsOf(input: unknown): string[];
+
+/** true when a command line is sent to alalanet (it may install or run something). */
+export function mayInstall(line: string): boolean;
+
+export interface CommandVerdict {
+  /** allow: nothing to say; deny: alalanet blocks; ask: alalanet holds, or could not check (checked false) */
+  decision: "allow" | "deny" | "ask";
+  reason: string;
+  checked: boolean;
+  /** why it was not checked: daily-limit, rate, unreachable, too_large, browser, bad_answer */
+  notChecked?: string;
+}
+
+/** One command line to alalanet's install hook (POST /v1/hooks/claude-code). Never throws. */
+export function checkCommand(command: string, opts?: AlalanetCallOptions): Promise<CommandVerdict>;
+
+export interface PreflightVerdict {
+  decision: "allow" | "hold" | "block" | "unchecked";
+  reasons: string[];
+  /** alalanet's whole answer */
+  verdict?: Record<string, unknown>;
+  error?: string;
+  hint?: string;
+}
+
+/** One payment to alalanet's preflight (POST with the 402 terms, GET with the URL alone). Never throws. */
+export function preflight(payment: PaymentToCheck, opts?: AlalanetCallOptions): Promise<PreflightVerdict>;
+
+export interface AlalanetToolOptions extends AlalanetCallOptions {
+  /** return alalanet's whole answer, signed bundle included (default: the fields the model needs and attestation_id) */
+  full?: boolean;
+  /** preflightPayment: max_usd when the model passes none */
+  maxUsdPerCall?: number;
+}
+
+export function installCheck(opts?: AlalanetToolOptions): Tool<{ target: string }, Record<string, unknown>>;
+export function preflightPayment(opts?: AlalanetToolOptions): Tool<{ url: string; paymentRequired?: string; maxUsd?: number }, Record<string, unknown>>;
+export function checkRepoConfig(opts?: AlalanetToolOptions): Tool<{ repo?: string; ref?: string; files?: Record<string, string> }, Record<string, unknown>>;
+export function alalanetTools(opts?: AlalanetToolOptions): {
+  installCheck: ReturnType<typeof installCheck>;
+  preflightPayment: ReturnType<typeof preflightPayment>;
+  checkRepoConfig: ReturnType<typeof checkRepoConfig>;
+};
+
+export const VERSION: string;
+export type { ToolApprovalStatus, ToolSet };

@@ -1,0 +1,4 @@
+node_modules/
+*.tgz
+.mutants/
+test-output.log

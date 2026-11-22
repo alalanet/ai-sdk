@@ -1,0 +1,41 @@
+# Tests on every push and pull request, on the Node versions the package supports, against the pinned ai and zod
+# of package-lock.json and against the newest ai 7 and zod releases (a new SDK release that changes toolApproval
+# fails here before a user meets it). No secrets, no network calls besides npm's registry: the tests talk to a fake
+# alalanet on 127.0.0.1.
+name: ci
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '17 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+        deps: ['locked', 'latest']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci --ignore-scripts
+      - name: newest ai and zod
+        if: matrix.deps == 'latest'
+        run: npm install --no-save --ignore-scripts ai@7 zod@latest
+      - run: npm test
+      - name: the tests catch a broken block, fail-closed and approval path
+        if: matrix.node == '22' && matrix.deps == 'locked'
+        run: npm run mutants
+      - name: the published files
+        if: matrix.node == '22' && matrix.deps == 'locked'
+        run: npm pack --dry-run

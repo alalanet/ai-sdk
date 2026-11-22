@@ -1,0 +1,69 @@
+{
+  "name": "@alalanet/ai-sdk",
+  "version": "0.1.0",
+  "description": "Asks alalanet before a Vercel AI SDK agent runs an install command or pays an x402 endpoint, in the SDK's toolApproval: a blocked package (known malicious, typosquat, a name that does not exist) is denied with the reason, a held one waits for the user, and a failed check never lets the command run unasked. Also installCheck, preflightPayment and checkRepoConfig tools.",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "approval.js",
+    "core.js",
+    "filter.js",
+    "tools.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js && tsc -p test/tsconfig.json",
+    "mutants": "node test/mutants.mjs"
+  },
+  "peerDependencies": {
+    "ai": "^7.0.0",
+    "zod": "^3.25.76 || ^4.1.8"
+  },
+  "devDependencies": {
+    "@types/json-schema": "7.0.15",
+    "@types/node": "22.20.5",
+    "ai": "7.0.179",
+    "typescript": "7.0.2",
+    "zod": "4.6.7"
+  },
+  "keywords": [
+    "ai-sdk",
+    "vercel-ai-sdk",
+    "toolApproval",
+    "tool-approval",
+    "ai-agents",
+    "agent-security",
+    "supply-chain",
+    "install-check",
+    "x402",
+    "preflight",
+    "alalanet"
+  ],
+  "homepage": "https://alalanet.com/docs/ai-sdk",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alalanet/ai-sdk.git"
+  },
+  "bugs": "https://github.com/alalanet/ai-sdk/issues",
+  "license": "MIT",
+  "author": "alalanet <noreply@alalanet.com>",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
