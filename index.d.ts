@@ -10,6 +10,8 @@ export interface AlalanetCallOptions {
   deviceKey?: string;
   /** per request to alalanet, default 20000 */
   timeoutMs?: number;
+  /** an empty answer of the hook allows only with Alalanet-Silence: nothing-to-check (default false until alalanet sends that header) */
+  requireSilenceMark?: boolean;
   fetch?: typeof globalThis.fetch;
   /** put in front of this package's User-Agent */
   userAgent?: string;
@@ -40,12 +42,12 @@ export interface AlalanetDecision {
 }
 
 export interface AlalanetApprovalOptions extends AlalanetCallOptions {
-  /** tool names that are shells (replaces DEFAULT_SHELL_TOOLS), or { name: (input) => command line(s) } */
+  /** tool names that are shells (a list replaces DEFAULT_SHELL_TOOLS; names compare without case, "_" or "-"), or { name: (input) => command line(s) } (adds to them) */
   shellTools?: string[] | Record<string, (input: any) => string | string[] | undefined | Promise<string | string[] | undefined>>;
-  /** any tool whose input has a string `command` counts as a shell (default true) */
+  /** any tool whose input has a command line in command, cmd, commandLine, command_line or script counts as a shell (default true) */
   detectCommandInput?: boolean;
-  /** send only lines that may install or run something (mayInstall); false sends every command (default true) */
-  prefilter?: boolean;
+  /** which lines go to alalanet: true (default) every line but the plainly read-only (isReadOnly); false every line; or your own test, true to send */
+  prefilter?: boolean | ((line: string) => boolean | Promise<boolean>);
   /** tools that pay: names (input.url is read), or { name: (input) => url | PaymentToCheck } */
   paymentTools?: string[] | Record<string, (input: any) => string | PaymentToCheck | undefined | Promise<string | PaymentToCheck | undefined>>;
   /** max_usd sent to preflight for a payment tool call */
@@ -68,18 +70,24 @@ export function alalanetApproval(opts?: AlalanetApprovalOptions): AlalanetApprov
 /** The tool names treated as a shell by default. */
 export const DEFAULT_SHELL_TOOLS: string[];
 
-/** The command lines in a shell tool's input: command (string or argv), commands, cmd, and the same under action. */
+/** The command lines in a shell tool's input, and what could not be read (which makes the approval ask). */
+export function readCommands(input: unknown): { lines: string[]; unread: string[] };
+
+/** readCommands(input).lines */
 export function commandsOf(input: unknown): string[];
 
-/** true when a command line is sent to alalanet (it may install or run something). */
-export function mayInstall(line: string): boolean;
+/** true when a command line stays in your process: every command in it plainly read-only (ls, cat, git status, ...). */
+export function isReadOnly(line: string): boolean;
+
+/** true when a command line goes to alalanet: !isReadOnly(line). */
+export function mustSend(line: string): boolean;
 
 export interface CommandVerdict {
   /** allow: nothing to say; deny: alalanet blocks; ask: alalanet holds, or could not check (checked false) */
   decision: "allow" | "deny" | "ask";
   reason: string;
   checked: boolean;
-  /** why it was not checked: daily-limit, rate, unreachable, too_large, browser, bad_answer */
+  /** why it was not checked: daily-limit, rate, unreachable, too_large, browser, bad_answer, silence */
   notChecked?: string;
 }
 

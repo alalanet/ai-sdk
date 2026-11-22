@@ -41,8 +41,14 @@ repositories, skills, IDE extensions, MCP servers, `curl … | sh` scripts) and 
 
 A failure never lets a command run unasked. Answer a request as the AI SDK shows
 ([Tool Approvals](https://ai-sdk.dev/docs/agents/tool-approvals)): add a `tool-approval-response` and call
-the agent again, or `addToolApprovalResponse` in `useChat`. Set `experimental_toolApprovalSecret` too when the
-history comes from a browser: without it a client can forge an approval.
+the agent again, or `addToolApprovalResponse` in `useChat`.
+
+**When the message history comes from a client** (`useChat`, a serverless route that rebuilds the conversation from
+the request), set `experimental_toolApprovalSecret`. Without it a client can send back an approval it made up, and
+the SDK only evaluates the policy again: a call alalanet blocks stays denied while alalanet answers, but if that
+second check is NOT CHECKED (alalanet unreachable, the daily limit used up) it asks, and the made-up approval runs
+the call. With the secret, `ai` 7.0.178 and later do not sign a denied call, so it cannot be replayed. Without the
+secret, `onUnchecked: "deny"` closes that gap at the cost of denying instead of asking when alalanet cannot check.
 
 A `toolApproval` function replaces every tool's own `needsApproval` in the SDK. `alalanetApproval` reads
 it back, so a tool marked `needsApproval` still asks. Your own policy goes in `fallback` (a per-tool map
@@ -58,25 +64,42 @@ tools of subagents, which the SDK runs without `toolApproval`.
 
 ## Which tools count as a shell
 
-- Tools named `bash`, `shell`, `sh`, `terminal`, `exec`, `execute`, `run`, `runCommand`, `run_command`,
-  `runShell`, `run_shell`, `executeCommand`, `execute_command`, `shellCommand`, `shell_command`,
-  `local_shell`, `runTerminalCommand`, `run_terminal_cmd`, `sandbox` or `codeExecution`
-  (`DEFAULT_SHELL_TOOLS`). The command is read from `command` (a string, or argv as an array), `commands`
-  (a list, each checked), `cmd`, or the same under `action`, as OpenAI's `shell` and `local_shell` send it.
-  Such a tool called without any of these asks the user.
-- Any other tool whose input has a string `command`, an MCP server's `execute_command` included
+- Tools named `bash`, `shell`, `sh`, `zsh`, `powershell`, `pwsh`, `terminal`, `exec`, `execute`, `run`,
+  `command`, `cmd`, `runCommand`, `runShell`, `runBash`, `executeCommand`, `execCommand`, `shellCommand`,
+  `localShell`, `runTerminalCommand`, `runTerminalCmd`, `runInTerminal`, `sandbox` or `codeExecution`
+  (`DEFAULT_SHELL_TOOLS`), compared without case, `_` or `-`: `run_command`, `RunCommand` and `exec_command`
+  are on the list.
+- Any other tool whose input has a command line in `command`, `cmd`, `commandLine`, `command_line` or `script`
   (`detectCommandInput: false` turns this off).
-- Your own: `shellTools: { deploy: (input) => input.script }` (a function may return several lines), or a
-  list of names to replace the defaults.
+- Your own: `shellTools: { deploy: (input) => input.script }` (a function may return several lines; a map adds
+  to the defaults), or a list of names that replaces them.
 
-Only a line that names a package manager or installer (`npm`, `pnpm`, `yarn`, `bun`, `npx`, `bunx`,
-`pnpx`, `pip`, `pip3`, `pipx`, `uv`, `uvx`, `deno`, `go`, `skills`, `clawhub`, `openclaw`; `claude`,
-`codex` or `gemini` followed by `mcp`; `--install-extension`, `--add-mcp`), a download together with a
-runner (`curl … | sh`, `irm … | iex`), or that builds a word at run time (`$VAR`, `${…}`, `$(…)`, backticks,
-`$'…'`, `eval`) is sent. The test is on the whole line's text, also with quotes or backslashes between the
-letters, as a path or with `.cmd`, `.exe`, `.bat` or `.ps1`, so a line that only mentions one of them is
-sent too. `ls`, `git status` or `curl -o file` never leave your process. `prefilter: false` sends every
-command. `mayInstall(line)` is the test.
+What is read from the input (and the same under `action`, as OpenAI's `shell` and `local_shell` send it):
+
+- `command`, `cmd`, `commandLine`, `command_line`, `script`: a line, or argv as a list;
+- `args`, `argv`, `arguments`: appended to the program, POSIX-quoted, so Vercel Sandbox's
+  `{ cmd: "npm", args: ["install", "x"] }` is checked as `npm install x`;
+- `commands`: a list of lines or argv lists, each checked;
+- `stdin`: checked as a line of its own;
+- a shell's script: `bash -c '…'` (and `-lc`), `cmd /c …`, `pwsh -Command …` are checked as the script too.
+
+If any part cannot be read (a field of another type, a `commands` entry that is not a command, `bash -c` without
+its script, `pwsh -EncodedCommand`), the whole call asks the user. So does a named shell tool called with no
+command line.
+
+**Which lines are sent.** Every line except a plainly read-only one. A line stays in your process only when every
+command in it (split at `;`, `&&`, `||`, `|`, `&`) is `ls`, `pwd`, `cat`, `head`, `tail`, `wc`, `echo`, `printf`,
+`grep`, `egrep`, `fgrep`, `rg` (without `--pre` or `-z`) or `git status`, `git log`, `git diff`, `git show` (with
+no git option before the subcommand, and without `--ext-diff`, `--textconv` or `--output`). Plain quoting only, and
+no `$`, backtick, `<`, `>`, parenthesis, brace, backslash, `!`, line break, tab or non-ASCII character anywhere in
+the line. This side does not try to tell an install from other commands: alalanet's reader does that, and a copy of
+it here would always lag the server. The test is `isReadOnly(line)` (`mustSend` is its opposite).
+`prefilter: false` sends every line, including these; `prefilter: (line) => boolean` is your own test (true sends;
+an error in it sends).
+
+A line with nothing to check (no install in it) does not count against the daily checks, but every line sent
+counts against the hook's request rate (per address: a burst of 120, then 2 a second). Past it, a command asks
+(`NOT CHECKED`, retry in a few seconds).
 
 ## Payments
 
@@ -141,8 +164,9 @@ names the signed statement, `full: true` returns the whole answer). An error com
 | option | default | |
 |---|---|---|
 | `shellTools` | `DEFAULT_SHELL_TOOLS` | tool names, or `{ name: (input) => line \| lines }` |
-| `detectCommandInput` | `true` | any tool with a string `input.command` counts as a shell |
-| `prefilter` | `true` | send only lines that may install or run something (see above) |
+| `detectCommandInput` | `true` | any tool with a command line in `command`, `cmd`, `commandLine`, `command_line` or `script` counts as a shell |
+| `prefilter` | `true` | `true`: send every line but the plainly read-only (see above); `false`: every line; a function `(line) => boolean`: your own test |
+| `requireSilenceMark` | `false` | an empty answer allows only with `Alalanet-Silence: nothing-to-check` (see below) |
 | `paymentTools` | none | tool names, or `{ name: (input) => url \| { url, paymentRequired?, maxUsd? } }` |
 | `maxUsdPerCall` | none | `max_usd` for preflight, in US dollars |
 | `onHold` | `"ask"` | `"deny"`: deny a hold instead of asking |
@@ -161,12 +185,16 @@ for your own policy.
 
 ## What is sent to alalanet, and what it keeps
 
-- **A shell command.** Only a line the test above sends, whole, as typed (anything typed into it, a token
-  in a URL included, goes too), in one request `POST https://alalanet.com/v1/hooks/claude-code` as
+- **A shell command.** Every line but the plainly read-only ones (above), whole, as typed, in one request
+  `POST https://alalanet.com/v1/hooks/claude-code` as
   `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"…"}}`, the same request
   alalanet's other install hooks send, with the User-Agent `alalanet-ai-sdk/<version> (hook)`. The tool's
-  other input, its output, your messages and prompts are never sent. alalanet reads what the line installs or
-  runs, checks those, and never stores or logs the line itself. A line over 1 MiB is not sent; it asks.
+  other input, its output, your messages and prompts are never sent. A line over 1 MiB is not sent; it asks.
+  alalanet reads what the line installs or runs and checks those; in the words of its privacy statement, "We
+  never store or log the command line itself."
+- **Secrets in a command line.** A token or password typed into a line (`curl -H "Authorization: Bearer sk-…"`)
+  goes with it, over HTTPS, to alalanet, which reads the line to answer and does not keep it. Keep secrets in
+  environment variables: a line that says `$OPENAI_API_KEY` sends those letters, not the key.
 - **A payment.** The URL, and the 402 terms when your extractor returns them, with your `maxUsdPerCall`.
 - **The tools.** What the model passes them: a target, a URL and its terms, a repository name or the
   configuration files of a checkout (read to answer, not stored).
@@ -183,9 +211,14 @@ The full statement: [alalanet.com/privacy](https://alalanet.com/privacy).
   1,000 a day: `curl -X POST https://alalanet.com/v1/device-keys` once, put the key in `ALALANET_DEVICE_KEY`.
   Agents behind one address (a CI fleet behind NAT) share these; a used-up limit asks the user (`NOT CHECKED`)
   until 00:00 UTC. Plans: [alalanet.com/pricing](https://alalanet.com/pricing).
-- In a browser alalanet's hook answers nothing (a web page must not spend a visitor's checks), so this
-  package asks for every shell command there: run the agent on a server.
+- alalanet's hook answers a request that carries `Origin` (a browser's, a worker's, an extension's) with an empty
+  200, as it answers a line with nothing to check: a web page must not spend a visitor's checks. So in a browser, a
+  worker or an extension (`document`, `chrome.runtime`, a service worker's `registration`, `WorkerGlobalScope`,
+  `importScripts`) this package sends nothing and every shell command asks: run the agent on a server. alalanet will
+  mark a real "nothing to check" with the header `Alalanet-Silence: nothing-to-check`. When an answer carries that
+  header, it is the only empty answer that allows (another value asks); `requireSilenceMark: true` makes an
+  unmarked empty answer ask everywhere, and will be the default once the server sends the mark.
+- An answer over 1 MiB is not read: the command asks, a tool gets `answer_too_large`.
 
-Node 22+ (as `ai` 7), Bun, Deno, edge runtimes; `ai` 7 (`toolApproval` came with 7.0.0) and `zod` 3.25 or 4 as
-peer dependencies, no other dependency. With `experimental_toolApprovalSecret`, use `ai` 7.0.178 or later: earlier
-versions signed the approval request of a call the policy denied. License: MIT.
+Node 22+ (as `ai` 7), Bun, Deno, edge runtimes; `ai` 7.0.178 or later (earlier 7.x versions signed the approval
+request of a call the policy denied) and `zod` 3.25 or 4 as peer dependencies, no other dependency. License: MIT.

@@ -9,6 +9,15 @@ const REASON_MAX = 2000;
 
 // What the server says when it did not check: Alalanet-Not-Checked on a hook answer.
 const NOT_CHECKED_HEADER = "alalanet-not-checked";
+// An answer is read up to 1 MiB; a longer one is not read (and a command waits for the user).
+const ANSWER_MAX = 1 << 20;
+// The hook's empty 200 means "nothing to say", and also "a browser's request, ignored". alalanet is to mark the first
+// with Alalanet-Silence: nothing-to-check. Present, it is the only silence that allows; an empty 200 with another
+// value asks. Until the server sends it, an unmarked silence allows only outside browsers and extensions (below).
+// Set this to true (or opts.requireSilenceMark) once the server marks its silence: then an unmarked one asks too.
+export const REQUIRE_SILENCE_MARK = false;
+const SILENCE_HEADER = "alalanet-silence";
+const SILENCE_OK = "nothing-to-check";
 
 export function settings(opts = {}) {
   const api = String(opts.api || API).replace(/\/+$/, "");
@@ -50,11 +59,39 @@ async function request(s, path, init) {
   const timer = setTimeout(() => ctl.abort(), s.timeoutMs);
   try {
     const res = await s.call(`${s.api}${path}`, { ...init, redirect: "manual", signal: ctl.signal });
-    const text = await res.text();
+    const text = await readCapped(res);
     return { res, text };
   } finally {
     clearTimeout(timer);
   }
+}
+
+class AnswerTooLarge extends Error {}
+
+// The answer's text, at most ANSWER_MAX bytes: past that the read stops and the answer counts as not read.
+async function readCapped(res) {
+  const reader = res.body?.getReader?.();
+  if (!reader) {
+    const t = await res.text();
+    if (t.length > ANSWER_MAX) throw new AnswerTooLarge("alalanet's answer is too large to read");
+    return t;
+  }
+  const parts = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > ANSWER_MAX) {
+      reader.cancel().catch(() => {});
+      throw new AnswerTooLarge("alalanet's answer is too large to read");
+    }
+    parts.push(value);
+  }
+  const all = new Uint8Array(n);
+  let at = 0;
+  for (const p of parts) all.set(p, (at += p.byteLength) - p.byteLength);
+  return new TextDecoder().decode(all);
 }
 
 // Text from outside goes to the model and the user: no control or invisible characters, bounded.
@@ -65,10 +102,19 @@ export function shown(text, max = REASON_MAX) {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
-// In a browser the hook answers every request with silence (a web page must not spend a client's checks), so a
-// silent answer there says nothing: a command is never let through on it.
-function inBrowser() {
-  return typeof window !== "undefined" && typeof window.document !== "undefined";
+// A browser, a worker or an extension: its fetch sends Origin, and alalanet's hook answers such a request with
+// silence (a web page must not spend a client's checks), so a silent answer there says nothing.
+export function browserLike() {
+  const g = globalThis;
+  return (
+    typeof g.document !== "undefined" ||
+    typeof g.window?.document !== "undefined" ||
+    Boolean(g.chrome?.runtime?.id) ||
+    Boolean(g.browser?.runtime?.id) ||
+    typeof g.registration !== "undefined" ||
+    typeof g.WorkerGlobalScope !== "undefined" ||
+    typeof g.importScripts === "function"
+  );
 }
 
 /**
@@ -80,21 +126,38 @@ function inBrowser() {
  *   "browser", "bad_answer"). A failure is never an allow.
  */
 export async function checkCommand(command, opts = {}) {
+  try {
+    return await askHook(command, opts);
+  } catch (e) {
+    return notChecked("bad_answer", `alalanet's answer could not be read (${shown(e?.message || e, 200)})`);
+  }
+}
+
+async function askHook(command, opts) {
   const s = opts.__settings || settings(opts);
   const line = String(command ?? "");
   const body = JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: line } });
   if (new TextEncoder().encode(body).length > HOOK_BODY_MAX) {
     return notChecked("too_large", "the command is too large for alalanet to read");
   }
-  if (inBrowser()) return notChecked("browser", "alalanet's install hook does not answer a browser's request; run the agent on a server");
+  if (browserLike()) return notChecked("browser", "alalanet's install hook does not answer a browser's or an extension's request; run the agent on a server");
   let res, text;
   try {
     ({ res, text } = await request(s, "/v1/hooks/claude-code", { method: "POST", headers: headers(s, "hook", true), body }));
   } catch (e) {
+    if (e instanceof AnswerTooLarge) return notChecked("bad_answer", e.message);
     return notChecked("unreachable", `alalanet could not be reached (${shown(e?.name === "AbortError" ? "timeout" : e?.message || e, 200)})`);
   }
   if (res.status !== 200) return notChecked("unreachable", `alalanet answered HTTP ${res.status}`);
-  if (text.trim() === "") return { decision: "allow", reason: "", checked: true };
+  if (text.trim() === "") {
+    const mark = res.headers?.get?.(SILENCE_HEADER);
+    if (mark) {
+      if (mark.trim().toLowerCase() === SILENCE_OK) return { decision: "allow", reason: "", checked: true };
+      return notChecked("silence", `alalanet answered with silence marked ${shown(mark, 40)}`);
+    }
+    if (REQUIRE_SILENCE_MARK || opts.requireSilenceMark) return notChecked("silence", "alalanet's silence carried no mark that it had nothing to check");
+    return { decision: "allow", reason: "", checked: true };
+  }
   let out;
   try {
     out = JSON.parse(text)?.hookSpecificOutput;
@@ -120,7 +183,15 @@ function notChecked(code, why) {
  * observed there (GET /v1/preflight). Returns { decision: "allow" | "hold" | "block" | "unchecked", reasons,
  * verdict?, error? }; "unchecked" when alalanet could not answer.
  */
-export async function preflight({ url, paymentRequired, maxUsd, client } = {}, opts = {}) {
+export async function preflight(payment, opts = {}) {
+  try {
+    return await askPreflight(payment ?? {}, opts);
+  } catch (e) {
+    return { decision: "unchecked", reasons: [], error: "bad_answer", hint: shown(e?.message || e, 200) };
+  }
+}
+
+async function askPreflight({ url, paymentRequired, maxUsd, client }, opts) {
   const s = opts.__settings || settings(opts);
   let res, text;
   try {
@@ -142,7 +213,13 @@ export async function preflight({ url, paymentRequired, maxUsd, client } = {}, o
   if (res.status !== 200 || !json || !["allow", "hold", "block"].includes(json.decision)) {
     return { decision: "unchecked", reasons: [], error: shown(json?.error || `http_${res.status}`, 80), hint: shown(json?.hint || json?.message || "", 500) };
   }
-  const reasons = [...new Set((json.options || []).flatMap((o) => o.reasons || []).concat(json.reasons || []))].map((r) => shown(r, 80));
+  // options must be a list of objects, reasons lists of strings: any other shape is an answer not read
+  const list = (v) => v === undefined || v === null || (Array.isArray(v) && v.every((r) => typeof r === "string"));
+  const options = json.options ?? [];
+  if (!Array.isArray(options) || !options.every((o) => o && typeof o === "object" && !Array.isArray(o) && list(o.reasons)) || !list(json.reasons)) {
+    return { decision: "unchecked", reasons: [], error: "bad_answer", hint: "alalanet's preflight answer has an unexpected shape" };
+  }
+  const reasons = [...new Set(options.flatMap((o) => o.reasons || []).concat(json.reasons || []))].map((r) => shown(r, 80));
   return { decision: json.decision, reasons, verdict: json };
 }
 
@@ -173,6 +250,7 @@ export async function getJSON(path, { method = "GET", query, body } = {}, opts =
     if (ra) out.retry_after_seconds = Number(ra) || shown(ra, 40);
     return out;
   } catch (e) {
+    if (e instanceof AnswerTooLarge) return { error: "answer_too_large", hint: e.message };
     return { error: "alalanet_unreachable", hint: shown(e?.name === "AbortError" ? "timeout" : e?.message || e, 200) };
   }
 }

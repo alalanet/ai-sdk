@@ -2,7 +2,7 @@
 import { ToolLoopAgent, generateText, streamText, tool, isStepCount, type ToolApprovalConfiguration } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
-import { alalanetApproval, alalanetTools, checkCommand, preflight, mayInstall, type CommandVerdict } from "@alalanet/ai-sdk";
+import { alalanetApproval, alalanetTools, checkCommand, preflight, isReadOnly, readCommands, type CommandVerdict } from "@alalanet/ai-sdk";
 
 const model = new MockLanguageModelV4();
 const runCommand = tool({ inputSchema: z.object({ command: z.string() }), execute: async ({ command }) => command });
@@ -24,5 +24,7 @@ void streamText({ model, tools, toolApproval: approval, prompt: "x" });
 
 const v: Promise<CommandVerdict> = checkCommand("npx x", { timeoutMs: 1000 });
 void preflight({ url: "https://x.example/paid" });
-const b: boolean = mayInstall("npx x");
-void [asConfig, v, b];
+const b: boolean = isReadOnly("ls");
+const r: string[] = readCommands({ cmd: "npm", args: ["i"] }).unread;
+alalanetApproval({ prefilter: (line) => !line.startsWith("ls"), requireSilenceMark: true });
+void [asConfig, v, b, r];
