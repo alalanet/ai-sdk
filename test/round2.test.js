@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { alalanetApproval, checkCommand, preflight, mustSend, readCommands, installCheck } from "../index.js";
 import { fakeAlalanet } from "./fake-alalanet.js";
+import { asRuntime } from "./runtime.js";
 
 let fa;
 before(async () => (fa = await fakeAlalanet()));
@@ -14,13 +15,16 @@ const call = (toolName, input, toolCallId = "c1") => ({ toolCall: { type: "tool-
 const type = (s) => (s === undefined ? "not-applicable" : typeof s === "string" ? s : s.type);
 const sentSince = (n) => fa.hooks().slice(n).map((h) => JSON.parse(h.body).tool_input.command);
 
-test("every line of the review's corpus that alalanet's reader acts on is sent", () => {
-  const { lines } = JSON.parse(readFileSync(new URL("./fixtures/server-acts.json", import.meta.url), "utf8"));
-  assert.ok(lines.length >= 100);
-  const missed = lines.filter((l) => l.acts && !mustSend(l.line)).map((l) => l.line);
-  assert.deepEqual(missed, []);
+test("every line of the review's three corpora that alalanet's reader acts on is sent", () => {
+  for (const [f, size] of [["server-acts.json", 104], ["server-acts-r2.json", 163], ["server-acts-r3.json", 18]]) {
+    const { lines } = JSON.parse(readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8"));
+    assert.equal(lines.length, size, f);
+    const missed = lines.filter((l) => l.acts && !mustSend(l.line)).map((l) => l.line);
+    assert.deepEqual(missed, [], f);
+  }
   // and the plainly read-only lines of the corpus stay here
-  for (const l of ["ls -la", "git status"]) assert.equal(mustSend(l), false, l);
+  assert.equal(mustSend("ls -la"), false);
+  assert.equal(mustSend("git status"), true);
 });
 
 test("the lines the first filter missed are sent", () => {
@@ -34,7 +38,7 @@ test("the lines the first filter missed are sent", () => {
 
 test("a program and its args are one line: {cmd, args}, {command, args}, argv lists", async () => {
   assert.deepEqual(readCommands({ cmd: "npm", args: ["install", "evil-pkg"] }), { lines: ["npm install evil-pkg"], unread: [] });
-  assert.deepEqual(readCommands({ command: "npm", argv: ["i", "a b"] }).lines, ["npm i 'a b'"]);
+  assert.deepEqual(readCommands({ command: "npm", argv: ["i", "a b"] }).lines, ["npm i 'a b'", "npm i a b"]);
   assert.deepEqual(readCommands({ command: ["npm", "i"], args: ["x"] }).lines, ["npm i x"]);
   const n = fa.hooks().length;
   const s = await alalanetApproval({ api: fa.api })(call("runCommand", { cmd: "npm", args: ["install", "evil-pkg"] }));
@@ -43,8 +47,8 @@ test("a program and its args are one line: {cmd, args}, {command, args}, argv li
 });
 
 test("a shell's -c script and stdin are sent as lines of their own", async () => {
-  assert.deepEqual(readCommands({ command: "bash", args: ["-c", "npm i evil-pkg"] }).lines, ["bash -c 'npm i evil-pkg'", "npm i evil-pkg"]);
-  assert.deepEqual(readCommands({ command: ["/bin/sh", "-lc", "npx x"] }).lines, ["/bin/sh -lc 'npx x'", "npx x"]);
+  assert.deepEqual(readCommands({ command: "bash", args: ["-c", "npm i evil-pkg"] }).lines, ["bash -c 'npm i evil-pkg'", "bash -c npm i evil-pkg", "npm i evil-pkg"]);
+  assert.deepEqual(readCommands({ command: ["/bin/sh", "-lc", "npx x"] }).lines, ["/bin/sh -lc 'npx x'", "/bin/sh -lc npx x", "npx x"]);
   assert.deepEqual(readCommands({ cmd: "cmd.exe", args: ["/c", "npm", "i", "x"] }).lines, ["cmd.exe /c npm i x", "npm i x"]);
   assert.deepEqual(readCommands({ cmd: "pwsh", args: ["-Command", "npm", "i", "x"] }).lines, ["pwsh -Command npm i x", "npm i x"]);
   assert.deepEqual(readCommands({ command: "bash", stdin: "npm i evil-pkg" }).lines, ["bash", "npm i evil-pkg"]);
@@ -115,21 +119,41 @@ test("silence allows only when it can be trusted", async () => {
   assert.equal(type(await alalanetApproval({ fetch: reply(""), requireSilenceMark: true })(call("bash", { command: "npx q" }))), "user-approval");
 });
 
-test("in a browser, a worker or an extension nothing is sent and the command asks", async () => {
-  const g = globalThis;
-  for (const [key, value] of [["document", {}], ["chrome", { runtime: { id: "abc" } }], ["browser", { runtime: { id: "abc" } }], ["registration", {}], ["WorkerGlobalScope", function () {}], ["importScripts", () => {}]]) {
-    const had = Object.hasOwn(g, key);
-    const old = g[key];
-    g[key] = value;
+test("in a browser, a browser's worker or an extension nothing is sent and the command asks", async () => {
+  for (const [key, value] of [["document", {}], ["window", { document: {} }], ["chrome", { runtime: { id: "abc" } }], ["browser", { runtime: { id: "abc" } }], ["registration", {}], ["WorkerGlobalScope", function () {}], ["importScripts", () => {}]]) {
+    let asked = false;
+    const r = await asRuntime({ [key]: value }, () => checkCommand("npx q", { fetch: async () => ((asked = true), new Response("")) }));
+    assert.deepEqual([r.decision, r.notChecked, asked], ["ask", "browser", false], key);
+  }
+  // an Electron renderer has Node's process, and its fetch sends Origin
+  let asked = false;
+  const r = await asRuntime({ process: { type: "renderer", versions: { node: "22.0.0" } } }, () => checkCommand("npx q", { fetch: async () => ((asked = true), new Response("")) }));
+  assert.deepEqual([r.decision, r.notChecked, asked], ["ask", "browser", false]);
+});
+
+test("server runtimes are checked: Node with a global document (jsdom and the like), workerd, Deno, Bun", async () => {
+  const sent = async (run) => {
+    let asked = 0;
+    const r = await run(async () => ((asked += 1), new Response("")));
+    return [r.decision, asked];
+  };
+  // Node with jsdom's globals: process is there, so the line is sent
+  for (const k of ["document", "window"]) {
+    const had = Object.getOwnPropertyDescriptor(globalThis, k);
+    globalThis[k] = k === "window" ? { document: {} } : {};
     try {
-      let asked = false;
-      const r = await checkCommand("npx q", { fetch: async () => ((asked = true), new Response("")) });
-      assert.deepEqual([r.decision, r.notChecked, asked], ["ask", "browser", false], key);
+      assert.deepEqual(await sent((fetch) => checkCommand("npx q", { fetch })), ["allow", 1], k);
     } finally {
-      if (had) g[key] = old;
-      else delete g[key];
+      if (had) Object.defineProperty(globalThis, k, had);
+      else delete globalThis[k];
     }
   }
+  // workerd: WorkerGlobalScope and navigator.userAgent "Cloudflare-Workers", no process
+  assert.deepEqual(await sent((fetch) => asRuntime({ WorkerGlobalScope: function () {}, navigator: { userAgent: "Cloudflare-Workers" } }, () => checkCommand("npx q", { fetch }))), ["allow", 1]);
+  assert.deepEqual(await sent((fetch) => asRuntime({ Deno: { version: { deno: "2.5.0" } }, document: {} }, () => checkCommand("npx q", { fetch }))), ["allow", 1]);
+  assert.deepEqual(await sent((fetch) => asRuntime({ Bun: { version: "1.3.0" }, WorkerGlobalScope: function () {} }, () => checkCommand("npx q", { fetch }))), ["allow", 1]);
+  // a worker that only claims another user agent is still a worker
+  assert.deepEqual(await sent((fetch) => asRuntime({ WorkerGlobalScope: function () {}, navigator: { userAgent: "Mozilla/5.0" } }, () => checkCommand("npx q", { fetch }))), ["ask", 0]);
 });
 
 test("preflight never throws on an answer of an odd shape: it is unchecked, and the payment asks", async () => {

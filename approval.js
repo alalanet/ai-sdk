@@ -3,7 +3,7 @@
 // not check -> the user decides (or denied with onUnchecked: "deny"), never a silent run.
 
 import { checkCommand, preflight, settings, shown } from "./core.js";
-import { mustSend } from "./filter.js";
+import { mustSend, simpleWords } from "./filter.js";
 
 // Tool names treated as a shell by default, compared without case, "_" or "-" (run_command, runCommand and
 // RunCommand are one name); any tool whose input has a string command, cmd, commandLine, command_line or script
@@ -15,13 +15,20 @@ export const DEFAULT_SHELL_TOOLS = [
 ];
 export const normalName = (n) => String(n ?? "").toLowerCase().replace(/[-_]/g, "");
 
-// Fields that hold a whole command line, a program with its arguments, or a script fed to the program.
+// Fields that hold a whole command line or a program (with args); text a tool feeds into a running process.
 const LINE_FIELDS = ["command", "cmd", "commandLine", "command_line", "script"];
+const PROGRAM_FIELDS = ["file", "program", "executable"]; // a program only with args: {file: "npm", args: [...]}
 const ARG_FIELDS = ["args", "argv", "arguments"];
+const TEXT_FIELDS = ["stdin", "input", "chars", "data", "text", "keys"];
+// Tools that write into a running process (Desktop Commander, Codex, terminal multiplexers), and the fields that
+// name the process: such a tool, or any tool with one of these fields and a text field, is read like a shell.
+export const PROCESS_TOOLS = ["interact_with_process", "write_stdin", "send_input", "send_keys", "write_to_process"];
+const PROCESS_FIELDS = ["pid", "session_id", "sessionId", "process_id", "processId"];
 // Programs whose -c (or /c, -Command) argument is a script; with no such argument they read the script from stdin.
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish", "busybox", "pwsh", "powershell", "cmd"]);
 
 const isStrings = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
+const given = (v) => v !== undefined && v !== null;
 
 function quote(a) {
   return /^[\w@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, "'\\''")}'`;
@@ -31,10 +38,22 @@ function program(word) {
   return word.slice(Math.max(word.lastIndexOf("/"), word.lastIndexOf("\\")) + 1).toLowerCase().replace(/\.exe$/, "");
 }
 
+// A PowerShell parameter as PowerShell reads it: -x, --x or /x, any unambiguous prefix of the name.
+function pwshParam(a) {
+  const m = /^(?:--|-|\/)([a-z]+)$/i.exec(a);
+  if (!m) return "";
+  const n = m[1].toLowerCase();
+  if ("encodedcommand".startsWith(n) || n === "ec") return "encoded"; // -e, -ec, -en, -enc, ... -encodedcommand
+  if (n.startsWith("commandwithargs") || n === "cwa") return "command";
+  if ("command".startsWith(n)) return "command"; // -c, -co, -com, ... -command
+  if ("file".startsWith(n)) return "file";
+  return "";
+}
+
 // What a shell's argv runs: { script } for bash -c '...' (and -lc, -ec), cmd /c ..., pwsh -Command ...;
 // { encoded } for pwsh -EncodedCommand; { file } for a script file; { none } for a shell that reads stdin;
 // undefined when argv[0] is not a shell.
-function shellScript(argv) {
+export function shellScript(argv) {
   const p = program(argv[0]);
   if (!SHELLS.has(p)) return undefined;
   for (let i = 1; i < argv.length; i++) {
@@ -45,9 +64,10 @@ function shellScript(argv) {
       continue;
     }
     if (p === "pwsh" || p === "powershell") {
-      if (/^-(e|ec|en|enc|enco|encodedcommand)$/.test(low)) return { encoded: true };
-      if (/^-(c|command)$/.test(low)) return { script: argv.slice(i + 1).join(" ") };
-      if (/^-(f|file)$/.test(low)) return { file: true };
+      const k = pwshParam(a);
+      if (k === "encoded") return { encoded: true };
+      if (k === "command") return { script: argv.slice(i + 1).join(" ") };
+      if (k === "file") return { file: true };
       continue;
     }
     if (p === "busybox" && i === 1 && SHELLS.has(low)) continue; // busybox sh -c ...
@@ -60,17 +80,21 @@ function shellScript(argv) {
 
 /**
  * The command lines in a shell tool's input, and what could not be read. Read are, in the input and under its
- * action (OpenAI's shell and local_shell): command, cmd, commandLine, command_line and script (a line, or argv as a
- * list), with args, argv or arguments appended to the program, POSIX-quoted ({cmd: "npm", args: ["install", "x"]}
- * is "npm install x"); commands (a list of lines or argv lists); and stdin, sent as a line of its own. The script
- * of a shell argv (bash -c, cmd /c, pwsh -Command) is sent as a line too. A field of another type, a list entry that
- * is not a command, a shell -c without its script, a PowerShell -EncodedCommand: unread, and the call asks.
+ * action (OpenAI's shell and local_shell):
+ * - command, cmd, commandLine, command_line, script: a line, or argv as a list;
+ * - args, argv, arguments appended to the program (command, cmd, or file, program, executable), sent twice: POSIX-
+ *   quoted, as an argv tool runs it, and joined with spaces, as a tool that runs it through a shell does
+ *   ({command: "npm install", args: ["x"]} is "'npm install' x" and "npm install x");
+ * - commands: a list of lines or argv lists;
+ * - stdin, input, chars, data, text, keys: text fed to the program or a running process, sent as lines;
+ * - the script of a shell's argv or of a one-command line (bash -c, cmd /c, pwsh -Command and its prefixes).
+ * A field of another type, a list entry that is not a command, a shell -c without its script, a PowerShell
+ * -EncodedCommand (any prefix, -, -- or /): unread, and the call asks.
  */
 export function readCommands(input) {
   const lines = [];
   const unread = [];
-  const argvLine = (argv) => {
-    lines.push(argv.map(quote).join(" "));
+  const shellOf = (argv) => {
     const sh = shellScript(argv);
     if (sh?.encoded) unread.push("an encoded PowerShell command");
     else if (sh && "script" in sh) {
@@ -78,40 +102,57 @@ export function readCommands(input) {
       else unread.push("a shell's -c without its script");
     }
   };
+  const argvLine = (argv) => {
+    const quoted = argv.map(quote).join(" ");
+    lines.push(quoted);
+    const plain = argv.join(" ");
+    if (plain !== quoted) lines.push(plain);
+    shellOf(argv);
+  };
+  // a one-command line with plain quoting: its shell script is read here as well (pwsh -comm '...', bash -c '...')
+  const textLine = (line) => {
+    lines.push(line);
+    const ws = simpleWords(line);
+    if (ws && ws.length) shellOf(ws);
+  };
   for (const src of [input, input?.action]) {
     if (!src || typeof src !== "object" || Array.isArray(src)) continue;
     let args;
     for (const f of ARG_FIELDS) {
-      if (src[f] === undefined || src[f] === null) continue;
+      if (!given(src[f])) continue;
       if (isStrings(src[f])) args = [...(args ?? []), ...src[f]];
       else unread.push(`${f} is not a list of strings`);
     }
     let used = !args;
-    for (const f of LINE_FIELDS) {
+    for (const f of [...LINE_FIELDS, ...PROGRAM_FIELDS]) {
       const v = src[f];
-      if (v === undefined || v === null) continue;
-      if (typeof v === "string" && !used && (f === "command" || f === "cmd")) {
+      if (!given(v)) continue;
+      const programField = PROGRAM_FIELDS.includes(f);
+      if (programField && used) continue; // file, program, executable without args: not a command
+      if (typeof v === "string" && !used && (programField || f === "command" || f === "cmd")) {
         argvLine([v, ...args]);
         used = true;
-      } else if (typeof v === "string") lines.push(v);
+      } else if (typeof v === "string") textLine(v);
       else if (isStrings(v) && v.length) {
         argvLine(used ? v : [...v, ...args]);
         used = true;
       } else unread.push(`${f} is not a command line`);
     }
     if (!used) unread.push("arguments without a program to run");
-    if (src.commands !== undefined && src.commands !== null) {
+    if (given(src.commands)) {
       if (!Array.isArray(src.commands)) unread.push("commands is not a list");
       else
         for (const c of src.commands) {
-          if (typeof c === "string") lines.push(c);
+          if (typeof c === "string") textLine(c);
           else if (isStrings(c) && c.length) argvLine(c);
           else unread.push("an entry of commands is not a command line");
         }
     }
-    if (src.stdin !== undefined && src.stdin !== null) {
-      if (typeof src.stdin === "string") lines.push(src.stdin);
-      else unread.push("stdin is not text");
+    for (const f of TEXT_FIELDS) {
+      if (!given(src[f])) continue;
+      if (typeof src[f] === "string") textLine(src[f]);
+      else if (isStrings(src[f])) src[f].forEach(textLine);
+      else unread.push(`${f} is not text`);
     }
   }
   return { lines, unread };
@@ -132,10 +173,18 @@ function stricter(a, b) {
   return RANK[kind(b)] > RANK[kind(a)] ? b : a;
 }
 
-// A tool not named as a shell counts as one when its input has a command line in one of these fields.
+// A tool not named as a shell counts as one when its input has a command line in one of the line fields, a
+// program field with args, or a process field (pid, session_id, ...) with a text field.
 function hasCommandField(input) {
   if (!input || typeof input !== "object") return false;
-  return LINE_FIELDS.some((f) => typeof input[f] === "string" || isStrings(input[f])) || typeof input.action?.command === "string" || isStrings(input.action?.command) || isStrings(input.action?.commands);
+  const line = (v) => typeof v === "string" || isStrings(v);
+  for (const src of [input, input.action]) {
+    if (!src || typeof src !== "object") continue;
+    if (LINE_FIELDS.some((f) => line(src[f])) || isStrings(src.commands)) return true;
+    if (PROGRAM_FIELDS.some((f) => line(src[f])) && ARG_FIELDS.some((f) => given(src[f]))) return true;
+    if (PROCESS_FIELDS.some((f) => given(src[f])) && TEXT_FIELDS.some((f) => given(src[f]))) return true;
+  }
+  return false;
 }
 
 // A list replaces the defaults; a map of extractors adds to them. Names compare without case, "_" or "-".
@@ -158,10 +207,11 @@ export function alalanetApproval(opts = {}) {
   const s = settings(opts);
   const o = { ...opts, __settings: s };
   const shell = nameSet(opts.shellTools, DEFAULT_SHELL_TOOLS);
+  const processTools = nameSet(undefined, PROCESS_TOOLS);
   const pay = nameSet(opts.paymentTools ?? {}, []);
   const onHold = opts.onHold || "ask";
   const onUnchecked = opts.onUnchecked || "ask";
-  // which lines are sent: by default all but the plainly read-only (isReadOnly); false: every line; a function
+  // which lines are sent: by default all but those that only print (isReadOnly); false: every line; a function
   // (line) => boolean: your own test, true to send
   const sends = typeof opts.prefilter === "function" ? opts.prefilter : opts.prefilter === false ? () => true : mustSend;
   const detect = opts.detectCommandInput !== false;
@@ -271,7 +321,7 @@ export function alalanetApproval(opts = {}) {
     if (pay.has(toolName)) {
       status = await judgePayment(toolName, toolCallId, input);
     } else {
-      const named = shell.has(toolName);
+      const named = shell.has(toolName) || processTools.has(toolName);
       const pick = shell.get(toolName);
       let lines = [];
       let unread = [];

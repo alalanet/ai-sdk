@@ -84,12 +84,12 @@ test("generateText: alalanet unreachable makes the command wait for the user", a
 });
 
 test("generateText: a command alalanet has nothing to say about runs, and one that installs nothing is not sent", async () => {
-  for (const command of ["npm install left-pad", "git status"]) {
+  for (const command of ["npm install left-pad", "ls -la"]) {
     const n = fa.hooks().length;
     const sh = shell();
     await generateText({ model: model(command), tools: { runCommand: sh.runCommand }, toolApproval: alalanetApproval({ api: fa.api }), stopWhen: isStepCount(5), prompt: "go" });
     assert.deepEqual(sh.ran, [command]);
-    assert.equal(fa.hooks().length, n + (command === "git status" ? 0 : 1));
+    assert.equal(fa.hooks().length, n + (command === "ls -la" ? 0 : 1));
   }
 });
 

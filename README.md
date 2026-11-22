@@ -69,31 +69,41 @@ tools of subagents, which the SDK runs without `toolApproval`.
   `localShell`, `runTerminalCommand`, `runTerminalCmd`, `runInTerminal`, `sandbox` or `codeExecution`
   (`DEFAULT_SHELL_TOOLS`), compared without case, `_` or `-`: `run_command`, `RunCommand` and `exec_command`
   are on the list.
-- Any other tool whose input has a command line in `command`, `cmd`, `commandLine`, `command_line` or `script`
-  (`detectCommandInput: false` turns this off).
+- Tools that write into a running process: `interact_with_process` (Desktop Commander), `write_stdin`,
+  `send_input`, `send_keys`, `write_to_process`, and any tool whose input has `pid`, `session_id`, `sessionId`,
+  `process_id` or `processId` together with a text field (below).
+- Any other tool whose input has a command line in `command`, `cmd`, `commandLine`, `command_line` or `script`,
+  or a program in `file`, `program` or `executable` with `args` (`detectCommandInput: false` turns this off).
 - Your own: `shellTools: { deploy: (input) => input.script }` (a function may return several lines; a map adds
   to the defaults), or a list of names that replaces them.
 
 What is read from the input (and the same under `action`, as OpenAI's `shell` and `local_shell` send it):
 
 - `command`, `cmd`, `commandLine`, `command_line`, `script`: a line, or argv as a list;
-- `args`, `argv`, `arguments`: appended to the program, POSIX-quoted, so Vercel Sandbox's
-  `{ cmd: "npm", args: ["install", "x"] }` is checked as `npm install x`;
+- `args`, `argv`, `arguments`: appended to the program (`command`, `cmd`, or `file`, `program`, `executable`), and
+  checked twice: POSIX-quoted, as a tool that spawns argv runs it, and joined with spaces, as a tool that runs it
+  through a shell does. `{ cmd: "npm", args: ["install", "x"] }` is `npm install x`;
+  `{ command: "npm install", args: ["x"] }` is `'npm install' x` and `npm install x`. The strictest verdict wins;
 - `commands`: a list of lines or argv lists, each checked;
-- `stdin`: checked as a line of its own;
-- a shell's script: `bash -c '…'` (and `-lc`), `cmd /c …`, `pwsh -Command …` are checked as the script too.
+- `stdin`, `input`, `chars`, `data`, `text`, `keys`: text fed to the program or to a running process, each checked
+  as a line;
+- a shell's script, in argv or in a one-command line: `bash -c '…'` (and `-lc`), `cmd /c …`, and PowerShell's
+  `-Command` in any form PowerShell takes (`-c`, `-co`, … `-command`, `-CommandWithArgs`, with `-`, `--` or `/`)
+  are checked as the script too.
 
 If any part cannot be read (a field of another type, a `commands` entry that is not a command, `bash -c` without
-its script, `pwsh -EncodedCommand`), the whole call asks the user. So does a named shell tool called with no
-command line.
+its script, PowerShell's `-EncodedCommand` in any prefix or form: `-e`, `-ec`, `-enc`, `-encod`, `/enc`,
+`--encodedcommand`), the whole call asks the user. So does a named shell tool called with no command line.
 
-**Which lines are sent.** Every line except a plainly read-only one. A line stays in your process only when every
-command in it (split at `;`, `&&`, `||`, `|`, `&`) is `ls`, `pwd`, `cat`, `head`, `tail`, `wc`, `echo`, `printf`,
-`grep`, `egrep`, `fgrep`, `rg` (without `--pre` or `-z`) or `git status`, `git log`, `git diff`, `git show` (with
-no git option before the subcommand, and without `--ext-diff`, `--textconv` or `--output`). Plain quoting only, and
-no `$`, backtick, `<`, `>`, parenthesis, brace, backslash, `!`, line break, tab or non-ASCII character anywhere in
-the line. This side does not try to tell an install from other commands: alalanet's reader does that, and a copy of
-it here would always lag the server. The test is `isReadOnly(line)` (`mustSend` is its opposite).
+**Which lines are sent.** Every line except one that only prints. A line stays in your process only when every
+command in it (split at `;`, `&&`, `||`, `|`, `&`) is `ls`, `pwd`, `cat`, `head`, `tail`, `wc`, `echo` or `printf`
+(not `printf -v`, which sets a variable), with plain quoting, and the line has no `$`, backtick, `<`, `>`,
+parenthesis, brace, backslash, `!`, line break, tab or non-ASCII character. These programs only read the files they
+are given and print; a line of them installs nothing and runs nothing else. `git`, `grep` and `rg` are sent: `git
+status`, `git diff` and `git log` run what a repository's config names (`core.fsmonitor`, `diff.external`, a
+textconv driver), and `rg` runs programs for `--pre`, `--hostname-bin` and `-z`, also from a file named `--pre=…`
+that a glob expands. This side does not try to tell an install from other commands: alalanet's reader does that,
+and a copy of it here would always lag the server. The test is `isReadOnly(line)` (`mustSend` is its opposite).
 `prefilter: false` sends every line, including these; `prefilter: (line) => boolean` is your own test (true sends;
 an error in it sends).
 
@@ -165,7 +175,7 @@ names the signed statement, `full: true` returns the whole answer). An error com
 |---|---|---|
 | `shellTools` | `DEFAULT_SHELL_TOOLS` | tool names, or `{ name: (input) => line \| lines }` |
 | `detectCommandInput` | `true` | any tool with a command line in `command`, `cmd`, `commandLine`, `command_line` or `script` counts as a shell |
-| `prefilter` | `true` | `true`: send every line but the plainly read-only (see above); `false`: every line; a function `(line) => boolean`: your own test |
+| `prefilter` | `true` | `true`: send every line but those that only print (see above); `false`: every line; a function `(line) => boolean`: your own test |
 | `requireSilenceMark` | `false` | an empty answer allows only with `Alalanet-Silence: nothing-to-check` (see below) |
 | `paymentTools` | none | tool names, or `{ name: (input) => url \| { url, paymentRequired?, maxUsd? } }` |
 | `maxUsdPerCall` | none | `max_usd` for preflight, in US dollars |
@@ -185,7 +195,7 @@ for your own policy.
 
 ## What is sent to alalanet, and what it keeps
 
-- **A shell command.** Every line but the plainly read-only ones (above), whole, as typed, in one request
+- **A shell command.** Every line but those that only print (above), whole, as typed, in one request
   `POST https://alalanet.com/v1/hooks/claude-code` as
   `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"…"}}`, the same request
   alalanet's other install hooks send, with the User-Agent `alalanet-ai-sdk/<version> (hook)`. The tool's
@@ -213,12 +223,15 @@ The full statement: [alalanet.com/privacy](https://alalanet.com/privacy).
   until 00:00 UTC. Plans: [alalanet.com/pricing](https://alalanet.com/pricing).
 - alalanet's hook answers a request that carries `Origin` (a browser's, a worker's, an extension's) with an empty
   200, as it answers a line with nothing to check: a web page must not spend a visitor's checks. So in a browser, a
-  worker or an extension (`document`, `chrome.runtime`, a service worker's `registration`, `WorkerGlobalScope`,
-  `importScripts`) this package sends nothing and every shell command asks: run the agent on a server. alalanet will
+  browser's worker, an extension or an Electron renderer (`document`, `window`, `chrome.runtime`, a service
+  worker's `registration`, `WorkerGlobalScope`, `importScripts`, `process.type === "renderer"`) this package sends
+  nothing and every shell command asks: run the agent on a server. A server runtime is checked even with such
+  globals: Node (also with jsdom, happy-dom or linkedom putting `document` in the global scope), Deno, Bun, and
+  Cloudflare Workers (`navigator.userAgent` `Cloudflare-Workers`, whose fetch sends no `Origin`). alalanet will
   mark a real "nothing to check" with the header `Alalanet-Silence: nothing-to-check`. When an answer carries that
   header, it is the only empty answer that allows (another value asks); `requireSilenceMark: true` makes an
   unmarked empty answer ask everywhere, and will be the default once the server sends the mark.
 - An answer over 1 MiB is not read: the command asks, a tool gets `answer_too_large`.
 
-Node 22+ (as `ai` 7), Bun, Deno, edge runtimes; `ai` 7.0.178 or later (earlier 7.x versions signed the approval
+Node 22+ (as `ai` 7), Bun, Deno, Cloudflare Workers; `ai` 7.0.178 or later (earlier 7.x versions signed the approval
 request of a call the policy denied) and `zod` 3.25 or 4 as peer dependencies, no other dependency. License: MIT.

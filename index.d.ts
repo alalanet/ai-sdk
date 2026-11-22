@@ -46,7 +46,7 @@ export interface AlalanetApprovalOptions extends AlalanetCallOptions {
   shellTools?: string[] | Record<string, (input: any) => string | string[] | undefined | Promise<string | string[] | undefined>>;
   /** any tool whose input has a command line in command, cmd, commandLine, command_line or script counts as a shell (default true) */
   detectCommandInput?: boolean;
-  /** which lines go to alalanet: true (default) every line but the plainly read-only (isReadOnly); false every line; or your own test, true to send */
+  /** which lines go to alalanet: true (default) every line but those that only print (isReadOnly); false every line; or your own test, true to send */
   prefilter?: boolean | ((line: string) => boolean | Promise<boolean>);
   /** tools that pay: names (input.url is read), or { name: (input) => url | PaymentToCheck } */
   paymentTools?: string[] | Record<string, (input: any) => string | PaymentToCheck | undefined | Promise<string | PaymentToCheck | undefined>>;
@@ -70,13 +70,19 @@ export function alalanetApproval(opts?: AlalanetApprovalOptions): AlalanetApprov
 /** The tool names treated as a shell by default. */
 export const DEFAULT_SHELL_TOOLS: string[];
 
+/** The tool names that write into a running process, read like shells. */
+export const PROCESS_TOOLS: string[];
+
+/** What a shell argv runs: { script }, { encoded } (pwsh -EncodedCommand), { file }, { none }; undefined for another program. */
+export function shellScript(argv: string[]): { script?: string; encoded?: true; file?: true; none?: true } | undefined;
+
 /** The command lines in a shell tool's input, and what could not be read (which makes the approval ask). */
 export function readCommands(input: unknown): { lines: string[]; unread: string[] };
 
 /** readCommands(input).lines */
 export function commandsOf(input: unknown): string[];
 
-/** true when a command line stays in your process: every command in it plainly read-only (ls, cat, git status, ...). */
+/** true when a command line stays in your process: every command in it only prints (ls, pwd, cat, head, tail, wc, echo, printf). */
 export function isReadOnly(line: string): boolean;
 
 /** true when a command line goes to alalanet: !isReadOnly(line). */

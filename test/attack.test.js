@@ -42,7 +42,7 @@ test("A-1 runCommand {cmd, args}: the whole line goes to alalanet, and the block
   assert.deepEqual(sent, ["npm install evil-pkg"]);
   assert.deepEqual(ran, []);
   assert.deepEqual(commandsOf({ command: "npm", args: ["i", "evil-pkg"] }), ["npm i evil-pkg"]);
-  assert.deepEqual(commandsOf({ command: "bash", args: ["-c", "npm i evil-pkg"] }), ["bash -c 'npm i evil-pkg'", "npm i evil-pkg"]);
+  assert.deepEqual(commandsOf({ command: "bash", args: ["-c", "npm i evil-pkg"] }), ["bash -c 'npm i evil-pkg'", "bash -c npm i evil-pkg", "npm i evil-pkg"]);
   assert.equal(type(await alalanetApproval({ api: fa.api })(ctx("bash", { command: "bash", args: ["-c", "npm i evil-pkg"] }))), "denied");
   assert.deepEqual(commandsOf({ command: "bash", stdin: "npm i evil-pkg" }), ["bash", "npm i evil-pkg"]);
   assert.equal(type(await alalanetApproval({ api: fa.api })(ctx("run_command", { command: "bash", stdin: "npm i evil-pkg" }))), "denied");

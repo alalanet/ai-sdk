@@ -102,10 +102,16 @@ export function shown(text, max = REASON_MAX) {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
-// A browser, a worker or an extension: its fetch sends Origin, and alalanet's hook answers such a request with
-// silence (a web page must not spend a client's checks), so a silent answer there says nothing.
+// A browser, a browser's worker or an extension: its fetch sends Origin, and alalanet's hook answers such a request
+// with silence (a web page must not spend a client's checks), so a silent answer there says nothing. A server
+// runtime is never one, even with a global document (jsdom, happy-dom, linkedom in tests or server rendering) or
+// WorkerGlobalScope (Cloudflare's workerd): Node, Deno and Bun name themselves, workerd's navigator.userAgent is
+// "Cloudflare-Workers". An Electron renderer has Node's process but sends Origin: it counts as a browser.
 export function browserLike() {
   const g = globalThis;
+  if (g.process?.type === "renderer") return true;
+  if (g.process?.versions?.node || g.Deno?.version || g.Bun?.version) return false;
+  if (g.navigator?.userAgent === "Cloudflare-Workers") return false;
   return (
     typeof g.document !== "undefined" ||
     typeof g.window?.document !== "undefined" ||

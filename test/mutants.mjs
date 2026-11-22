@@ -26,12 +26,11 @@ const mutants = [
   // round 2, F1: the filter
   { name: "F1: any program counts as read-only", file: "filter.js", from: "if (!READ_ONLY.has(cmd)) return false;", to: "" },
   { name: "F1: $, backticks, redirections and line breaks no longer send", file: "filter.js", from: "if (UNSURE.test(text)) return false;", to: "" },
-  { name: "F1: git's subcommand is not checked", file: "filter.js", from: "if (!GIT_READ.has(args[0])) return false;", to: "" },
   { name: "F1: the filter is back to an install word list", file: "approval.js", from: 'opts.prefilter === false ? () => true : mustSend;', to: 'opts.prefilter === false ? () => true : (l) => /\\b(npm|npx|pip|uvx)\\b/.test(l);' },
   // F2: arguments, shell scripts, stdin
   { name: "F2: args are not appended to the program", file: "approval.js", from: "argvLine([v, ...args]);", to: "lines.push(v);" },
   { name: "F2: a shell's -c script is not sent", file: "approval.js", from: 'if (typeof sh.script === "string" && sh.script.trim() !== "") lines.push(sh.script);', to: 'if (typeof sh.script === "string" && sh.script.trim() !== "") void 0;' },
-  { name: "F2: stdin is not sent", file: "approval.js", from: 'if (typeof src.stdin === "string") lines.push(src.stdin);', to: 'if (typeof src.stdin === "string") void 0;' },
+  { name: "F2: stdin (and the other text fields) is not sent", file: "approval.js", from: 'if (typeof src[f] === "string") textLine(src[f]);', to: 'if (typeof src[f] === "string") void 0;' },
   // F3: what cannot be read
   { name: "F3: an unread part of the call is dropped", file: "approval.js", from: "if (unread.length) {", to: "if (false) {" },
   // F4: silence
@@ -53,6 +52,20 @@ const mutants = [
   // F10: the answer's size
   { name: "F10: a stream answer is read whole", file: "core.js", from: "if (n > ANSWER_MAX) {", to: "if (false) {" },
   { name: "F10: a text answer is read whole", file: "core.js", from: 'if (t.length > ANSWER_MAX) throw new AnswerTooLarge("alalanet\'s answer is too large to read");', to: "" },
+  // round 3
+  { name: "R2-1: the shell-joined line of a program and its args is not sent", file: "approval.js", from: "if (plain !== quoted) lines.push(plain);", to: "" },
+  { name: "R2-2: process tools are not named", file: "approval.js", from: "const named = shell.has(toolName) || processTools.has(toolName);", to: "const named = shell.has(toolName);" },
+  { name: "R2-2: input, chars, data, text and keys are not read", file: "approval.js", from: "for (const f of TEXT_FIELDS) {", to: 'for (const f of ["stdin"]) {' },
+  { name: "R2-2: a process field with text is not detected", file: "approval.js", from: "if (PROCESS_FIELDS.some((f) => given(src[f])) && TEXT_FIELDS.some((f) => given(src[f]))) return true;", to: "" },
+  { name: "R2-2: file, program and executable are not programs", file: "approval.js", from: "for (const f of [...LINE_FIELDS, ...PROGRAM_FIELDS]) {", to: "for (const f of LINE_FIELDS) {" },
+  { name: "R2-3: only some -EncodedCommand spellings are encoded", file: "approval.js", from: 'if ("encodedcommand".startsWith(n) || n === "ec") return "encoded";', to: 'if (n === "e" || n === "ec" || n === "enc" || n === "encodedcommand") return "encoded";' },
+  { name: "R2-3: only -c and -command are -Command", file: "approval.js", from: 'if ("command".startsWith(n)) return "command";', to: 'if (n === "c" || n === "command") return "command";' },
+  { name: "R2-3: a one-command line's shell script is not read", file: "approval.js", from: "if (ws && ws.length) shellOf(ws);", to: "" },
+  { name: "R2-4: Node, Deno and Bun are not known as servers", file: "core.js", from: "if (g.process?.versions?.node || g.Deno?.version || g.Bun?.version) return false;", to: "" },
+  { name: "R2-4: workerd is not known as a server", file: "core.js", from: 'if (g.navigator?.userAgent === "Cloudflare-Workers") return false;', to: "" },
+  { name: "R2-4: an Electron renderer is taken for a server", file: "core.js", from: 'if (g.process?.type === "renderer") return true;', to: "" },
+  { name: "R2-5: grep, rg and git are read-only again", file: "filter.js", from: 'const READ_ONLY = new Set(["ls", "pwd", "cat", "head", "tail", "wc", "echo", "printf"]);', to: 'const READ_ONLY = new Set(["ls", "pwd", "cat", "head", "tail", "wc", "echo", "printf", "grep", "rg", "git"]);' },
+  { name: "R2-5: printf -v stays local", file: "filter.js", from: 'if (cmd === "printf" && args.some((a) => a.startsWith("-v"))) return false;', to: "" },
 ];
 
 let bad = 0;
