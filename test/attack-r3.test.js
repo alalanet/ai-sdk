@@ -1,7 +1,7 @@
 // The review's round-3 attack tests (C-1 to C-5), kept as tests of the fixes.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { alalanetApproval, readCommands, isReadOnly } from "../index.js";
+import { alalanetApproval, readCommands, isReadOnly, shellScript } from "../index.js";
 import { browserLike } from "../core.js";
 import { fakeAlalanet } from "./fake-alalanet.js";
 import { asRuntime } from "./runtime.js";
@@ -14,15 +14,17 @@ const type = (s) => (s === undefined ? "not-applicable" : typeof s === "string" 
 
 test("C-1 the two-line rule reads an argv argument as shell too: the safe direction (kept, R3-6)", () => {
   const r = readCommands({ command: "git", args: ["commit", "-m", "x && npm i evil-pkg"] });
-  assert.deepEqual(r.lines, ["git commit -m 'x && npm i evil-pkg'", "git commit -m x && npm i evil-pkg"]);
-  assert.deepEqual(readCommands({ command: ["bash", "-lc", "npm i evil-pkg"] }).lines, ["bash -lc 'npm i evil-pkg'", "bash -lc npm i evil-pkg", "npm i evil-pkg"]);
+  // the joined line's parts are judged too (round 5)
+  assert.deepEqual(r.lines, ["git commit -m 'x && npm i evil-pkg'", "git commit -m x && npm i evil-pkg", "git commit -m x", "npm i evil-pkg"]);
+  assert.deepEqual(readCommands({ command: ["bash", "-lc", "npm i evil-pkg"] }).lines, ["bash -lc 'npm i evil-pkg'", "npm i evil-pkg", "bash -lc npm i evil-pkg", "npm"]);
 });
 
 test("C-2 PowerShell: every parameter form, and Windows PowerShell's positional -Command", () => {
   const out = {};
   for (const f of ["-c", "-co", "-con", "-config", "-cwa", "-CommandWithArgs", "-commandw", "-e", "-ex", "-ep", "/enc", "--encodedcommand", "-f", "-File"]) {
-    const r = readCommands({ command: ["pwsh", f, "npm i evil-pkg"] });
-    out[f] = r.unread.length ? "ask" : r.lines.includes("npm i evil-pkg") ? "script" : "-";
+    // the argv as PowerShell reads it (the joined line of the same argv is read as well, and asks for some)
+    const r = shellScript(["pwsh", f, "npm i evil-pkg"]);
+    out[f] = r.encoded || r.fileUnread ? "ask" : r.script === "npm i evil-pkg" ? "script" : "-";
   }
   assert.deepEqual(out, {
     "-c": "script", "-co": "script", "-con": "-", "-config": "-", "-cwa": "script", "-CommandWithArgs": "script", "-commandw": "script",

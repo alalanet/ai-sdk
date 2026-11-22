@@ -1,0 +1,83 @@
+{
+ "about": "Lines (the review's round-5 lines: compound, wrapped and nested PowerShell and cmd commands) and whether alalanet's install reader acts on them (installread.ParseLine + HookExtra at alalanetd 32524701; silent on all), from the review of 2026-11-22. The client must unpack the script of every one.",
+ "lines": [
+  {
+   "line": "cd /tmp && pwsh -comm 'npm i evil-pkg'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "env pwsh -comm 'npm i evil-pkg'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "sudo powershell npm i evil-pkg",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "timeout 60 pwsh -cwa 'npm i evil-pkg'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "nohup pwsh -comm 'npm i evil-pkg' &",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe npm i evil-pkg",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -comm 'npm i evil-pkg'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "cd x; cmd /cnpm i evil-pkg",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "bash -c \"cd x && pwsh -comm 'npm i evil-pkg'\"",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "pwsh -nop -comm 'npm i evil-pkg'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "sh -c 'pwsh -comm \"npm i evil-pkg\"'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "cd x && pwsh -comm 'npm i evil-pkg'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "pwsh -comm 'npm i evil-pkg'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  }
+ ]
+}

@@ -3,7 +3,7 @@
 // not check -> the user decides (or denied with onUnchecked: "deny"), never a silent run.
 
 import { checkCommand, preflight, settings, shown } from "./core.js";
-import { mustSend, simpleWords } from "./filter.js";
+import { mustSend, commandParts, commandWords, unwrap } from "./filter.js";
 
 // Tool names treated as a shell by default, compared without case, "_" or "-" (run_command, runCommand and
 // RunCommand are one name); any tool whose input has a string command, cmd, commandLine, command_line or script
@@ -24,6 +24,11 @@ const TEXT_FIELDS = ["stdin", "input", "chars", "data", "text", "keys"];
 // name the process: such a tool, or any tool with one of these fields and a text field, is read like a shell.
 export const PROCESS_TOOLS = ["interact_with_process", "write_stdin", "send_input", "send_keys", "write_to_process"];
 const PROCESS_FIELDS = ["pid", "session_id", "sessionId", "process_id", "processId", "terminal_id", "terminalId"];
+// The most lines one call sends, and how deep scripts inside scripts are read; past either, the call asks.
+const MAX_LINES = 64;
+const MAX_DEPTH = 4;
+const TOO_MANY = `more than ${MAX_LINES} command lines in one call`;
+const WINDOWS_SHELLS = new Set(["pwsh", "powershell", "cmd"]);
 // Programs whose -c (or /c, -Command) argument is a script; with no such argument they read the script from stdin.
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish", "busybox", "pwsh", "powershell", "cmd"]);
 
@@ -117,27 +122,57 @@ export function shellScript(argv) {
 export function readCommands(input) {
   const lines = [];
   const unread = [];
-  const shellOf = (argv) => {
+  const add = (line) => {
+    if (lines.includes(line)) return;
+    if (lines.length >= MAX_LINES) {
+      if (!unread.includes(TOO_MANY)) unread.push(TOO_MANY);
+      return;
+    }
+    lines.push(line);
+  };
+  // a shell's script goes back through the whole reader, so a script inside a script is read too (bounded)
+  const shellOf = (argv, depth) => {
     const sh = shellScript(argv);
     if (sh?.encoded) unread.push("an encoded PowerShell command");
     else if (sh?.fileUnread) unread.push("a PowerShell script file, which is not read");
     else if (sh && "script" in sh) {
-      if (typeof sh.script === "string" && sh.script.trim() !== "") lines.push(sh.script);
+      if (typeof sh.script === "string" && sh.script.trim() !== "") textLine(sh.script, depth + 1);
       else unread.push("a shell's -c without its script");
     }
   };
+  // A line, and every simple command in it (split at ; && || | & and parentheses), each from its program on
+  // (wrappers such as env, sudo, timeout and VAR=x skipped); a shell's script in any of them is read the same way.
+  // A PowerShell or cmd command keeps its backslashes (C:\...\powershell.exe).
+  const textLine = (line, depth = 0) => {
+    if (depth > MAX_DEPTH) {
+      unread.push(`scripts nested more than ${MAX_DEPTH} deep`);
+      return;
+    }
+    add(line);
+    const parts = commandParts(line) ?? [];
+    for (const part of parts) {
+      const posix = commandWords(part);
+      let argv = posix ? unwrap(posix, []) : [];
+      if (part.includes("\\")) {
+        const literal = commandWords(part, true);
+        const lit = literal ? unwrap(literal, []) : [];
+        if (lit.length && WINDOWS_SHELLS.has(program(lit[0]))) argv = lit;
+      }
+      const inner = [];
+      if (posix) unwrap(posix, inner); // env -S '...': a line of its own
+      for (const l of inner) textLine(l, depth + 1);
+      if (!argv.length) continue;
+      if (parts.length > 1) add(part.trim());
+      if (posix && argv.length !== posix.length) add(argv.map(quote).join(" "));
+      shellOf(argv, depth);
+    }
+  };
+  // argv, as an argv tool runs it (POSIX-quoted) and as a tool that runs it through a shell does (joined)
   const argvLine = (argv) => {
     const quoted = argv.map(quote).join(" ");
-    lines.push(quoted);
+    textLine(quoted);
     const plain = argv.join(" ");
-    if (plain !== quoted) lines.push(plain);
-    shellOf(argv);
-  };
-  // a one-command line with plain quoting: its shell script is read here as well (pwsh -comm '...', bash -c '...')
-  const textLine = (line) => {
-    lines.push(line);
-    const ws = simpleWords(line);
-    if (ws && ws.length) shellOf(ws);
+    if (plain !== quoted) textLine(plain);
   };
   for (const src of [input, input?.action]) {
     if (!src || typeof src !== "object" || Array.isArray(src)) continue;
@@ -175,7 +210,7 @@ export function readCommands(input) {
     for (const f of TEXT_FIELDS) {
       if (!given(src[f])) continue;
       if (typeof src[f] === "string") textLine(src[f]);
-      else if (isStrings(src[f])) src[f].forEach(textLine);
+      else if (isStrings(src[f])) src[f].forEach((l) => textLine(l));
       else unread.push(`${f} is not text`);
     }
   }
@@ -198,22 +233,39 @@ function stricter(a, b) {
 }
 
 // A tool not named as a shell counts as one when its input has a command line in one of the line fields, or a
-// program field with args; or, for a tool whose name says it drives a process or a terminal, a text field (with a
-// process field, or in a terminal's tool: tmux send-keys, a terminal's type action). A chat tool with a session_id
-// and a text is not a shell.
-const PROCESS_NAME = /process|terminal|shell|stdin|pty|tmux|exec|command|run/;
-const TERMINAL_NAME = /terminal|shell|stdin|pty|tmux/;
+// program field with args; or a text field (input, chars, data, text, keys) together with:
+// - a process's or a terminal's id (pid, process_id, processId, terminal_id, terminalId), whatever the name;
+// - a session id (session_id, sessionId), when the tool's name has a process word or the input names a program;
+// - nothing else, when the tool's name has a terminal word (tmux send-keys, a terminal's type action).
+// Names are compared word by word (split at _, - and camelCase): rerun_report, executive_summary and
+// command_palette_note are not shells; "command" and "keys" count only as the name's last word (run_command, send_keys).
+const PROCESS_WORDS = new Set(["process", "terminal", "stdin", "shell", "pty", "tty", "console", "tmux", "screen", "bash", "exec", "repl", "run"]);
+const LAST_WORDS = new Set(["command", "keys"]);
+const TERMINAL_WORDS = new Set(["terminal", "stdin", "shell", "pty", "tty", "console", "tmux", "screen", "bash", "repl"]);
+const STRONG_FIELDS = ["pid", "process_id", "processId", "terminal_id", "terminalId"];
+export function nameWords(name) {
+  return String(name ?? "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+function hasWord(words, set) {
+  return words.some((w) => set.has(w)) || (words.length > 0 && LAST_WORDS.has(words[words.length - 1]) && set === PROCESS_WORDS);
+}
 function hasCommandField(input, toolName) {
   if (!input || typeof input !== "object") return false;
   const line = (v) => typeof v === "string" || isStrings(v);
-  const name = normalName(toolName);
+  const words = nameWords(toolName);
   for (const src of [input, input.action]) {
     if (!src || typeof src !== "object") continue;
     if (LINE_FIELDS.some((f) => line(src[f])) || isStrings(src.commands)) return true;
     if (PROGRAM_FIELDS.some((f) => line(src[f])) && ARG_FIELDS.some((f) => given(src[f]))) return true;
-    const text = TEXT_FIELDS.some((f) => given(src[f]));
-    if (text && PROCESS_FIELDS.some((f) => given(src[f])) && (PROCESS_NAME.test(name) || PROGRAM_FIELDS.some((f) => line(src[f])))) return true;
-    if (text && TERMINAL_NAME.test(name)) return true;
+    if (!TEXT_FIELDS.some((f) => given(src[f]))) continue;
+    if (STRONG_FIELDS.some((f) => given(src[f]))) return true;
+    if (PROCESS_FIELDS.some((f) => given(src[f])) && (hasWord(words, PROCESS_WORDS) || PROGRAM_FIELDS.some((f) => line(src[f])))) return true;
+    if (hasWord(words, TERMINAL_WORDS)) return true;
   }
   return false;
 }

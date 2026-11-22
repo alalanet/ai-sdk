@@ -70,12 +70,15 @@ tools of subagents, which the SDK runs without `toolApproval`.
   (`DEFAULT_SHELL_TOOLS`), compared without case, `_` or `-`: `run_command`, `RunCommand` and `exec_command`
   are on the list.
 - Tools that write into a running process: `interact_with_process` (Desktop Commander), `write_stdin`,
-  `send_input`, `send_keys`, `write_to_process`; a tool whose input has `pid`, `session_id`, `sessionId`,
-  `process_id`, `processId`, `terminal_id` or `terminalId` together with a text field (below), when its name says
-  it drives a process (it contains `process`, `terminal`, `shell`, `stdin`, `pty`, `tmux`, `exec`, `command` or
-  `run`) or the input names a program; and a terminal's tool (a name with `terminal`, `shell`, `stdin`, `pty` or
-  `tmux`) with a text field, such as tmux send-keys. A chat or speech tool with a `session_id` and a `text` is not
-  read. Typing into a terminal through a GUI tool (a `computer` tool's `type` action) is not seen unless the
+  `send_input`, `send_keys`, `write_to_process`; any tool whose input has a text field (below) with a process's
+  or a terminal's id (`pid`, `process_id`, `processId`, `terminal_id`, `terminalId`); a tool with a session id
+  (`session_id`, `sessionId`) and a text field when its name has a process word (`process`, `terminal`, `stdin`,
+  `shell`, `pty`, `tty`, `console`, `tmux`, `screen`, `bash`, `exec`, `repl`, `run`, or `command` or `keys` as its
+  last word) or the input names a program; and a tool whose name has a terminal word (`terminal`, `stdin`,
+  `shell`, `pty`, `tty`, `console`, `tmux`, `screen`, `bash`, `repl`) with a text field alone, such as tmux
+  send-keys. Names are compared word by word, split at `_`, `-` and camelCase: `rerun_report`,
+  `executive_summary` and `command_palette_note` are not shells, and a chat or speech tool with a `session_id`
+  and a `text` is not read. Other process tools go in `shellTools`. Typing into a terminal through a GUI tool (a `computer` tool's `type` action) is not seen unless the
   tool's name says terminal: name such a tool in `shellTools`.
 - Any other tool whose input has a command line in `command`, `cmd`, `commandLine`, `command_line` or `script`,
   or a program in `file`, `program` or `executable` with `args` (`detectCommandInput: false` turns this off).
@@ -92,10 +95,17 @@ What is read from the input (and the same under `action`, as OpenAI's `shell` an
 - `commands`: a list of lines or argv lists, each checked;
 - `stdin`, `input`, `chars`, `data`, `text`, `keys`: text fed to the program or to a running process, each checked
   as a line;
-- a shell's script, in argv or in a one-command line: `bash -c '…'` (and `-lc`), `cmd /c …` (also glued,
+- every simple command of a line (split at `;`, `&&`, `||`, `|`, `&` and parentheses outside quotes), each as
+  a line of its own, from its program on: `VAR=x` words, shell keywords and wrappers (`env`, `sudo`, `doas`,
+  `timeout N`, `nohup`, `nice`, `ionice`, `command`, `builtin`, `exec`, `stdbuf`, `xargs`, `time`) with their
+  options are skipped, and `env -S '…'` is read as a line. A PowerShell or cmd command keeps its backslashes, and
+  a program is known by its file name without `.exe` (`C:\Windows\…\powershell.exe`);
+- a shell's script, in argv or in any of those commands: `bash -c '…'` (and `-lc`), `cmd /c …` (also glued,
   `/cnpm …`, `/C"…"`, and `/k`, `/r`), PowerShell's `-Command` in any form PowerShell takes (`-c`, `-co`, …
   `-command`, `-CommandWithArgs`, with `-`, `--` or `/`), and Windows PowerShell's positional words, which it runs
-  as `-Command` (`powershell -NoProfile npm i x`), are checked as the script too.
+  as `-Command` (`powershell -NoProfile npm i x`), are checked as the script too, and the script is read again
+  the same way, so a script inside a script is unpacked (`sh -c 'pwsh -comm "npm i x"'`), up to four levels;
+  deeper nesting, or more than 64 lines in one call, asks.
 
 If any part cannot be read (a field of another type, a `commands` entry that is not a command, `bash -c` without
 its script, PowerShell's `-EncodedCommand` in any prefix or form: `-e`, `-ec`, `-enc`, `-encod`, `/enc`,

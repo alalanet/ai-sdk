@@ -47,8 +47,8 @@ test("a program and its args are one line: {cmd, args}, {command, args}, argv li
 });
 
 test("a shell's -c script and stdin are sent as lines of their own", async () => {
-  assert.deepEqual(readCommands({ command: "bash", args: ["-c", "npm i evil-pkg"] }).lines, ["bash -c 'npm i evil-pkg'", "bash -c npm i evil-pkg", "npm i evil-pkg"]);
-  assert.deepEqual(readCommands({ command: ["/bin/sh", "-lc", "npx x"] }).lines, ["/bin/sh -lc 'npx x'", "/bin/sh -lc npx x", "npx x"]);
+  assert.deepEqual(readCommands({ command: "bash", args: ["-c", "npm i evil-pkg"] }).lines, ["bash -c 'npm i evil-pkg'", "npm i evil-pkg", "bash -c npm i evil-pkg", "npm"]);
+  assert.deepEqual(readCommands({ command: ["/bin/sh", "-lc", "npx x"] }).lines, ["/bin/sh -lc 'npx x'", "npx x", "/bin/sh -lc npx x", "npx"]);
   assert.deepEqual(readCommands({ cmd: "cmd.exe", args: ["/c", "npm", "i", "x"] }).lines, ["cmd.exe /c npm i x", "npm i x"]);
   assert.deepEqual(readCommands({ cmd: "pwsh", args: ["-Command", "npm", "i", "x"] }).lines, ["pwsh -Command npm i x", "npm i x"]);
   assert.deepEqual(readCommands({ command: "bash", stdin: "npm i evil-pkg" }).lines, ["bash", "npm i evil-pkg"]);

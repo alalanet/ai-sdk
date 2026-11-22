@@ -66,13 +66,144 @@ export function isReadOnly(line) {
   return true;
 }
 
-/** The words of a line that is one simple command with plain quoting (no operator, no expansion), or null. */
-export function simpleWords(line) {
-  const text = String(line ?? "");
-  if (UNSURE.test(text)) return null;
-  const parts = split(text);
-  if (!parts || parts.length !== 1) return null;
-  return words(parts[0]);
+// --- reading a command line to unpack it (the approval's reader; nothing here decides what stays local) ---
+
+/**
+ * The simple commands of a line: split at ;, &, |, (, ) and line breaks outside quotes (&& and || too). With
+ * literal (a PowerShell or cmd line) a backslash is a path character; otherwise it escapes the next one. null with
+ * an unbalanced quote.
+ */
+export function commandParts(text, literal = false) {
+  const parts = [];
+  let cur = "";
+  let q = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === q) q = "";
+      else if (q === '"' && !literal && c === "\\" && i + 1 < text.length) {
+        cur += c + text[++i];
+        continue;
+      }
+      cur += c;
+    } else if (!literal && c === "\\" && i + 1 < text.length) {
+      cur += c + text[++i];
+    } else if (c === "'" || c === '"') {
+      q = c;
+      cur += c;
+    } else if (";&|()\n\r".includes(c)) {
+      parts.push(cur);
+      cur = "";
+    } else cur += c;
+  }
+  if (q) return null;
+  parts.push(cur);
+  return parts.filter((p) => p.trim() !== "");
+}
+
+/**
+ * The words of one simple command as the shell passes them: quotes taken out, and with literal false a backslash
+ * escaping the next character (POSIX); with literal true backslashes stay (C:\Windows\...\powershell.exe). null
+ * with an unbalanced quote.
+ */
+export function commandWords(text, literal = false) {
+  const out = [];
+  let cur = null;
+  for (let i = 0; i < text.length; ) {
+    const c = text[i];
+    if (/\s/.test(c)) {
+      if (cur !== null) out.push(cur);
+      cur = null;
+      i++;
+      continue;
+    }
+    cur ??= "";
+    if (c === "'") {
+      const j = text.indexOf("'", i + 1);
+      if (j < 0) return null;
+      cur += text.slice(i + 1, j);
+      i = j + 1;
+    } else if (c === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') {
+        if (!literal && text[j] === "\\" && j + 1 < text.length && '$`"\\\n'.includes(text[j + 1])) {
+          if (text[j + 1] !== "\n") cur += text[j + 1];
+          j += 2;
+        } else cur += text[j++];
+      }
+      if (j >= text.length) return null;
+      i = j + 1;
+    } else if (c === "\\" && !literal) {
+      if (i + 1 < text.length && text[i + 1] !== "\n") cur += text[i + 1];
+      i += 2;
+    } else {
+      cur += c;
+      i++;
+    }
+  }
+  if (cur !== null) out.push(cur);
+  return out;
+}
+
+// Programs that run the rest of their words as a command, and their options that take a value.
+const WRAPPERS = {
+  env: ["-u", "--unset", "-C", "--chdir"],
+  sudo: ["-u", "--user", "-g", "--group", "-C", "--close-from", "-D", "--chdir", "-h", "--host", "-p", "--prompt", "-r", "--role", "-t", "--type", "-U", "--other-user", "-T", "--command-timeout"],
+  doas: ["-u", "-C"],
+  timeout: ["-k", "--kill-after", "-s", "--signal"],
+  nohup: [],
+  nice: ["-n", "--adjustment"],
+  ionice: ["-c", "--class", "-n", "--classdata", "-p", "--pid"],
+  command: [],
+  builtin: [],
+  exec: ["-a"],
+  stdbuf: ["-i", "--input", "-o", "--output", "-e", "--error"],
+  xargs: ["-I", "-i", "-L", "-l", "-n", "--max-args", "-P", "--max-procs", "-d", "--delimiter", "-E", "-e", "-s", "--max-chars", "-a", "--arg-file"],
+  time: ["-f", "--format", "-o", "--output"],
+  nocorrect: [],
+  noglob: [],
+};
+// words before a command that are not the program: shell keywords, a subshell's or group's brace
+const KEYWORDS = new Set(["if", "then", "else", "elif", "do", "while", "until", "!", "{", "}", "coproc"]);
+
+function base(word) {
+  return word.slice(Math.max(word.lastIndexOf("/"), word.lastIndexOf("\\")) + 1).toLowerCase().replace(/\.exe$/, "");
+}
+
+/**
+ * The words from the program on: VAR=x assignments, shell keywords and wrappers (env, sudo, doas, timeout N,
+ * nohup, nice, ionice, command, builtin, exec, stdbuf, xargs, time) with their options are skipped. lines gets the
+ * command line of env -S, which env splits and runs itself.
+ */
+export function unwrap(words, lines = []) {
+  let i = 0;
+  while (i < words.length) {
+    const w = words[i];
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) || KEYWORDS.has(w)) {
+      i++;
+      continue;
+    }
+    const p = base(w);
+    if (!Object.hasOwn(WRAPPERS, p)) break;
+    const valued = WRAPPERS[p];
+    i++;
+    while (i < words.length && words[i].startsWith("-") && words[i] !== "-") {
+      const o = words[i];
+      if (o === "--") {
+        i++;
+        break;
+      }
+      if (p === "env" && (o === "-S" || o === "--split-string")) {
+        if (i + 1 < words.length) lines.push(words[i + 1]);
+        i += 2;
+        continue;
+      }
+      if (p === "env" && o.startsWith("-S") && o.length > 2) lines.push(o.slice(2));
+      i += valued.includes(o) ? 2 : 1;
+    }
+    if (p === "timeout" && i < words.length) i++; // the duration
+  }
+  return words.slice(i);
 }
 
 // The line split at ;, &, | outside quotes (a quoted | or ; is an argument); null with an unbalanced quote.
