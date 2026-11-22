@@ -39,7 +39,7 @@ const mutants = [
   { name: "F4: any silence mark allows", file: "core.js", from: "if (mark.trim().toLowerCase() === SILENCE_OK) return", to: "if (true) return" },
   // F6: names and fields
   { name: "F6: shell names compare with case and _", file: "approval.js", from: 'export const normalName = (n) => String(n ?? "").toLowerCase().replace(/[-_]/g, "");', to: 'export const normalName = (n) => String(n ?? "");' },
-  { name: "F6: only input.command is detected", file: "approval.js", from: "else if (named || (detect && hasCommandField(input)))", to: 'else if (named || (detect && typeof input?.command === "string"))' },
+  { name: "F6: only input.command is detected", file: "approval.js", from: "else if (named || (detect && hasCommandField(input, toolName)))", to: 'else if (named || (detect && typeof input?.command === "string"))' },
   // F9: preflight's shapes
   {
     name: "F9: preflight reads any shape and lets a failure through",
@@ -56,16 +56,28 @@ const mutants = [
   { name: "R2-1: the shell-joined line of a program and its args is not sent", file: "approval.js", from: "if (plain !== quoted) lines.push(plain);", to: "" },
   { name: "R2-2: process tools are not named", file: "approval.js", from: "const named = shell.has(toolName) || processTools.has(toolName);", to: "const named = shell.has(toolName);" },
   { name: "R2-2: input, chars, data, text and keys are not read", file: "approval.js", from: "for (const f of TEXT_FIELDS) {", to: 'for (const f of ["stdin"]) {' },
-  { name: "R2-2: a process field with text is not detected", file: "approval.js", from: "if (PROCESS_FIELDS.some((f) => given(src[f])) && TEXT_FIELDS.some((f) => given(src[f]))) return true;", to: "" },
+  { name: "R2-2: a process field with text is not detected", file: "approval.js", from: "const text = TEXT_FIELDS.some((f) => given(src[f]));", to: "const text = false;" },
   { name: "R2-2: file, program and executable are not programs", file: "approval.js", from: "for (const f of [...LINE_FIELDS, ...PROGRAM_FIELDS]) {", to: "for (const f of LINE_FIELDS) {" },
-  { name: "R2-3: only some -EncodedCommand spellings are encoded", file: "approval.js", from: 'if ("encodedcommand".startsWith(n) || n === "ec") return "encoded";', to: 'if (n === "e" || n === "ec" || n === "enc" || n === "encodedcommand") return "encoded";' },
-  { name: "R2-3: only -c and -command are -Command", file: "approval.js", from: 'if ("command".startsWith(n)) return "command";', to: 'if (n === "c" || n === "command") return "command";' },
+  { name: "R2-3: only some -EncodedCommand spellings are encoded", file: "approval.js", from: 'if ("encodedcommand".startsWith(n) || n === "ec" || n.startsWith("encodeda")) return { kind: "encoded" };', to: 'if (n === "e" || n === "ec" || n === "enc" || n === "encodedcommand") return { kind: "encoded" };' },
+  { name: "R2-3: only -c and -command are -Command", file: "approval.js", from: 'if ("command".startsWith(n)) return { kind: "command" };', to: 'if (n === "c" || n === "command") return { kind: "command" };' },
   { name: "R2-3: a one-command line's shell script is not read", file: "approval.js", from: "if (ws && ws.length) shellOf(ws);", to: "" },
   { name: "R2-4: Node, Deno and Bun are not known as servers", file: "core.js", from: "if (g.process?.versions?.node || g.Deno?.version || g.Bun?.version) return false;", to: "" },
   { name: "R2-4: workerd is not known as a server", file: "core.js", from: 'if (g.navigator?.userAgent === "Cloudflare-Workers") return false;', to: "" },
-  { name: "R2-4: an Electron renderer is taken for a server", file: "core.js", from: 'if (g.process?.type === "renderer") return true;', to: "" },
+  { name: "R2-4: an Electron renderer is taken for a server", file: "core.js", from: 'g.process?.type === "renderer" || ', to: "" },
   { name: "R2-5: grep, rg and git are read-only again", file: "filter.js", from: 'const READ_ONLY = new Set(["ls", "pwd", "cat", "head", "tail", "wc", "echo", "printf"]);', to: 'const READ_ONLY = new Set(["ls", "pwd", "cat", "head", "tail", "wc", "echo", "printf", "grep", "rg", "git"]);' },
   { name: "R2-5: printf -v stays local", file: "filter.js", from: 'if (cmd === "printf" && args.some((a) => a.startsWith("-v"))) return false;', to: "" },
+  // round 4
+  { name: "R3-1: Windows PowerShell's positional words are not its script", file: "approval.js", from: 'return p === "powershell" ? { script: argv.slice(i).join(" ") } : { fileUnread: true };', to: "return { file: true };" },
+  { name: "R3-1: pwsh's positional script file does not ask", file: "approval.js", from: 'else if (sh?.fileUnread) unread.push("a PowerShell script file, which is not read");', to: "" },
+  { name: "R3-1: a valued parameter's value is not skipped", file: "approval.js", from: 'if (k.kind === "valued") i++;', to: "" },
+  { name: "R3-2: cmd's switch glued to the script is not read", file: "approval.js", from: "if (/^\\/[ckr]/.test(low)) {", to: 'if (low === "/c" || low === "/k" || low === "/r") {' },
+  { name: "R3-3: any tool with a session and a text is a shell", file: "approval.js", from: "if (text && PROCESS_FIELDS.some((f) => given(src[f])) && (PROCESS_NAME.test(name) || PROGRAM_FIELDS.some((f) => line(src[f])))) return true;", to: "if (text && PROCESS_FIELDS.some((f) => given(src[f]))) return true;" },
+  { name: "R3-4: a terminal's text without a process field is not read", file: "approval.js", from: "if (text && TERMINAL_NAME.test(name)) return true;", to: "" },
+  { name: "R3-4: terminalId is not a process field", file: "approval.js", from: '"process_id", "processId", "terminal_id", "terminalId"];', to: '"process_id", "processId"];' },
+  { name: "R3-5: a Node or workerd claim wins over extension marks", file: "core.js", from: 'if (g.process?.type === "renderer" || Boolean(g.chrome?.runtime?.id) || Boolean(g.browser?.runtime?.id)) return true;', to: 'if (g.process?.type === "renderer") return true;' },
+  { name: "R3-5: a service or dedicated worker is not detected", file: "core.js", from: 'if (typeof g.registration !== "undefined" || typeof g.importScripts === "function") return true;', to: "" },
+  { name: "R3-1b: bash's valued options are not skipped", file: "approval.js", from: "if (SH_VALUED.has(a)) {", to: "if (false) {" },
+  { name: "R3-7: a network share stays local", file: "filter.js", from: 'if (args.some((a) => a.startsWith("//"))) return false;', to: "" },
 ];
 
 let bad = 0;

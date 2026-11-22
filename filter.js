@@ -41,12 +41,14 @@ function readOnlyCommand(ws) {
   const [cmd, ...args] = ws;
   if (!READ_ONLY.has(cmd)) return false;
   if (cmd === "printf" && args.some((a) => a.startsWith("-v"))) return false; // printf -v NAME sets a variable (PATH)
+  if (args.some((a) => a.startsWith("//"))) return false; // //host/share: on Windows, an SMB connection with the user's credentials
   return true;
 }
 
 /**
  * true when the line stays in your process: every simple command in it (split at ;, &&, ||, | and &) is one of
- * ls, pwd, cat, head, tail, wc, echo or printf (not printf -v), with plain quoting, and the line has no $,
+ * ls, pwd, cat, head, tail, wc, echo or printf (not printf -v), with no argument that starts with // (a network
+ * share on Windows), with plain quoting, and the line has no $,
  * backtick, redirection, parenthesis, brace, backslash, !, line break, tab or non-ASCII character. An empty line
  * runs nothing and stays too.
  */

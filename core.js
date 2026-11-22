@@ -106,21 +106,17 @@ export function shown(text, max = REASON_MAX) {
 // with silence (a web page must not spend a client's checks), so a silent answer there says nothing. A server
 // runtime is never one, even with a global document (jsdom, happy-dom, linkedom in tests or server rendering) or
 // WorkerGlobalScope (Cloudflare's workerd): Node, Deno and Bun name themselves, workerd's navigator.userAgent is
-// "Cloudflare-Workers". An Electron renderer has Node's process but sends Origin: it counts as a browser.
+// "Cloudflare-Workers". An extension (chrome.runtime.id), a service worker (registration), a dedicated worker
+// (importScripts) and an Electron renderer (Node's process, but its fetch sends Origin) are browsers, whatever
+// else they claim.
 export function browserLike() {
   const g = globalThis;
-  if (g.process?.type === "renderer") return true;
+  // marks no server runtime has, checked first: a polyfilled process or a user agent string cannot hide them
+  if (g.process?.type === "renderer" || Boolean(g.chrome?.runtime?.id) || Boolean(g.browser?.runtime?.id)) return true;
+  if (typeof g.registration !== "undefined" || typeof g.importScripts === "function") return true;
   if (g.process?.versions?.node || g.Deno?.version || g.Bun?.version) return false;
   if (g.navigator?.userAgent === "Cloudflare-Workers") return false;
-  return (
-    typeof g.document !== "undefined" ||
-    typeof g.window?.document !== "undefined" ||
-    Boolean(g.chrome?.runtime?.id) ||
-    Boolean(g.browser?.runtime?.id) ||
-    typeof g.registration !== "undefined" ||
-    typeof g.WorkerGlobalScope !== "undefined" ||
-    typeof g.importScripts === "function"
-  );
+  return typeof g.document !== "undefined" || typeof g.window?.document !== "undefined" || typeof g.WorkerGlobalScope !== "undefined";
 }
 
 /**

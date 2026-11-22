@@ -23,7 +23,7 @@ const TEXT_FIELDS = ["stdin", "input", "chars", "data", "text", "keys"];
 // Tools that write into a running process (Desktop Commander, Codex, terminal multiplexers), and the fields that
 // name the process: such a tool, or any tool with one of these fields and a text field, is read like a shell.
 export const PROCESS_TOOLS = ["interact_with_process", "write_stdin", "send_input", "send_keys", "write_to_process"];
-const PROCESS_FIELDS = ["pid", "session_id", "sessionId", "process_id", "processId"];
+const PROCESS_FIELDS = ["pid", "session_id", "sessionId", "process_id", "processId", "terminal_id", "terminalId"];
 // Programs whose -c (or /c, -Command) argument is a script; with no such argument they read the script from stdin.
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish", "busybox", "pwsh", "powershell", "cmd"]);
 
@@ -38,21 +38,30 @@ function program(word) {
   return word.slice(Math.max(word.lastIndexOf("/"), word.lastIndexOf("\\")) + 1).toLowerCase().replace(/\.exe$/, "");
 }
 
-// A PowerShell parameter as PowerShell reads it: -x, --x or /x, any unambiguous prefix of the name.
+// sh and bash options that take a value
+const SH_VALUED = new Set(["-o", "+o", "-O", "+O", "--rcfile", "--init-file"]);
+// PowerShell parameters that take a value, skipped with it while looking for the script.
+const PWSH_VALUED = ["executionpolicy", "ep", "ex", "workingdirectory", "wd", "configurationname", "inputformat", "if",
+  "outputformat", "of", "windowstyle", "w", "settingsfile", "version", "v", "custompipename", "configurationfile", "psconsolefile"];
+
+// A PowerShell argument as PowerShell reads it: -x, --x or /x (and -x:value), any unambiguous prefix of the name.
+// { kind: "encoded" | "command" | "file" | "valued" | "switch" }, or null for a positional word.
 function pwshParam(a) {
-  const m = /^(?:--|-|\/)([a-z]+)$/i.exec(a);
-  if (!m) return "";
+  const m = /^(?:--|-|\/)([a-z]+)(:.*)?$/i.exec(a);
+  if (!m) return null;
   const n = m[1].toLowerCase();
-  if ("encodedcommand".startsWith(n) || n === "ec") return "encoded"; // -e, -ec, -en, -enc, ... -encodedcommand
-  if (n.startsWith("commandwithargs") || n === "cwa") return "command";
-  if ("command".startsWith(n)) return "command"; // -c, -co, -com, ... -command
-  if ("file".startsWith(n)) return "file";
-  return "";
+  const glued = m[2] !== undefined;
+  if ("encodedcommand".startsWith(n) || n === "ec" || n.startsWith("encodeda")) return { kind: "encoded" }; // -e, -ec, -enc ...
+  if ((n.length > 7 && "commandwithargs".startsWith(n)) || n === "cwa") return { kind: "command" }; // -commandw ... -CommandWithArgs
+  if ("command".startsWith(n)) return { kind: "command" }; // -c, -co, -com, ... -command
+  if ("file".startsWith(n)) return { kind: "file" };
+  const valued = PWSH_VALUED.some((v) => v === n || (n.length >= 2 && v.startsWith(n)));
+  return { kind: valued && !glued ? "valued" : "switch" };
 }
 
-// What a shell's argv runs: { script } for bash -c '...' (and -lc, -ec), cmd /c ..., pwsh -Command ...;
-// { encoded } for pwsh -EncodedCommand; { file } for a script file; { none } for a shell that reads stdin;
-// undefined when argv[0] is not a shell.
+// What a shell's argv runs: { script } for bash -c '...' (and -lc, -ec), cmd /c ..., pwsh -Command ..., Windows
+// PowerShell's positional words; { encoded } for pwsh -EncodedCommand; { fileUnread } for pwsh's positional script
+// file; { file } for a script file; { none } for a shell that reads stdin; undefined when argv[0] is not a shell.
 export function shellScript(argv) {
   const p = program(argv[0]);
   if (!SHELLS.has(p)) return undefined;
@@ -60,17 +69,31 @@ export function shellScript(argv) {
     const a = argv[i];
     const low = a.toLowerCase();
     if (p === "cmd") {
-      if (low === "/c" || low === "/k" || low === "/r") return { script: argv.slice(i + 1).join(" ") };
+      // /c, /k, /r, also glued to the script: /cnpm i x, /C"npm i x"
+      if (/^\/[ckr]/.test(low)) {
+        let script = [a.slice(2), ...argv.slice(i + 1)].filter((w) => w !== "").join(" ");
+        if (/^".*"$/s.test(script)) script = script.slice(1, -1);
+        return { script };
+      }
       continue;
     }
     if (p === "pwsh" || p === "powershell") {
       const k = pwshParam(a);
-      if (k === "encoded") return { encoded: true };
-      if (k === "command") return { script: argv.slice(i + 1).join(" ") };
-      if (k === "file") return { file: true };
+      if (k === null) {
+        // Windows PowerShell 5.1 runs its positional words as -Command; pwsh 7 takes the first as -File
+        return p === "powershell" ? { script: argv.slice(i).join(" ") } : { fileUnread: true };
+      }
+      if (k.kind === "encoded") return { encoded: true };
+      if (k.kind === "command") return { script: argv.slice(i + 1).join(" ") };
+      if (k.kind === "file") return { file: true };
+      if (k.kind === "valued") i++;
       continue;
     }
     if (p === "busybox" && i === 1 && SHELLS.has(low)) continue; // busybox sh -c ...
+    if (SH_VALUED.has(a)) {
+      i++; // bash -o pipefail -c ..., --rcfile x: the option's value
+      continue;
+    }
     if (a === "--") return { file: true };
     if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(a)) return { script: argv[i + 1] };
     if (!a.startsWith("-") && !a.startsWith("+")) return { file: true }; // bash install.sh: the file is not read here
@@ -97,6 +120,7 @@ export function readCommands(input) {
   const shellOf = (argv) => {
     const sh = shellScript(argv);
     if (sh?.encoded) unread.push("an encoded PowerShell command");
+    else if (sh?.fileUnread) unread.push("a PowerShell script file, which is not read");
     else if (sh && "script" in sh) {
       if (typeof sh.script === "string" && sh.script.trim() !== "") lines.push(sh.script);
       else unread.push("a shell's -c without its script");
@@ -173,16 +197,23 @@ function stricter(a, b) {
   return RANK[kind(b)] > RANK[kind(a)] ? b : a;
 }
 
-// A tool not named as a shell counts as one when its input has a command line in one of the line fields, a
-// program field with args, or a process field (pid, session_id, ...) with a text field.
-function hasCommandField(input) {
+// A tool not named as a shell counts as one when its input has a command line in one of the line fields, or a
+// program field with args; or, for a tool whose name says it drives a process or a terminal, a text field (with a
+// process field, or in a terminal's tool: tmux send-keys, a terminal's type action). A chat tool with a session_id
+// and a text is not a shell.
+const PROCESS_NAME = /process|terminal|shell|stdin|pty|tmux|exec|command|run/;
+const TERMINAL_NAME = /terminal|shell|stdin|pty|tmux/;
+function hasCommandField(input, toolName) {
   if (!input || typeof input !== "object") return false;
   const line = (v) => typeof v === "string" || isStrings(v);
+  const name = normalName(toolName);
   for (const src of [input, input.action]) {
     if (!src || typeof src !== "object") continue;
     if (LINE_FIELDS.some((f) => line(src[f])) || isStrings(src.commands)) return true;
     if (PROGRAM_FIELDS.some((f) => line(src[f])) && ARG_FIELDS.some((f) => given(src[f]))) return true;
-    if (PROCESS_FIELDS.some((f) => given(src[f])) && TEXT_FIELDS.some((f) => given(src[f]))) return true;
+    const text = TEXT_FIELDS.some((f) => given(src[f]));
+    if (text && PROCESS_FIELDS.some((f) => given(src[f])) && (PROCESS_NAME.test(name) || PROGRAM_FIELDS.some((f) => line(src[f])))) return true;
+    if (text && TERMINAL_NAME.test(name)) return true;
   }
   return false;
 }
@@ -327,7 +358,7 @@ export function alalanetApproval(opts = {}) {
       let unread = [];
       try {
         if (named && typeof pick === "function") lines = [].concat((await pick(input)) ?? []).filter((l) => typeof l === "string");
-        else if (named || (detect && hasCommandField(input))) ({ lines, unread } = readCommands(input));
+        else if (named || (detect && hasCommandField(input, toolName))) ({ lines, unread } = readCommands(input));
       } catch (e) {
         return unchecked(`alalanet install_check: NOT CHECKED — the command could not be read from ${shown(toolName, 80)}'s input (${shown(e?.message || e, 200)}). Run only if the user confirms.`);
       }

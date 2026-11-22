@@ -70,8 +70,13 @@ tools of subagents, which the SDK runs without `toolApproval`.
   (`DEFAULT_SHELL_TOOLS`), compared without case, `_` or `-`: `run_command`, `RunCommand` and `exec_command`
   are on the list.
 - Tools that write into a running process: `interact_with_process` (Desktop Commander), `write_stdin`,
-  `send_input`, `send_keys`, `write_to_process`, and any tool whose input has `pid`, `session_id`, `sessionId`,
-  `process_id` or `processId` together with a text field (below).
+  `send_input`, `send_keys`, `write_to_process`; a tool whose input has `pid`, `session_id`, `sessionId`,
+  `process_id`, `processId`, `terminal_id` or `terminalId` together with a text field (below), when its name says
+  it drives a process (it contains `process`, `terminal`, `shell`, `stdin`, `pty`, `tmux`, `exec`, `command` or
+  `run`) or the input names a program; and a terminal's tool (a name with `terminal`, `shell`, `stdin`, `pty` or
+  `tmux`) with a text field, such as tmux send-keys. A chat or speech tool with a `session_id` and a `text` is not
+  read. Typing into a terminal through a GUI tool (a `computer` tool's `type` action) is not seen unless the
+  tool's name says terminal: name such a tool in `shellTools`.
 - Any other tool whose input has a command line in `command`, `cmd`, `commandLine`, `command_line` or `script`,
   or a program in `file`, `program` or `executable` with `args` (`detectCommandInput: false` turns this off).
 - Your own: `shellTools: { deploy: (input) => input.script }` (a function may return several lines; a map adds
@@ -87,17 +92,19 @@ What is read from the input (and the same under `action`, as OpenAI's `shell` an
 - `commands`: a list of lines or argv lists, each checked;
 - `stdin`, `input`, `chars`, `data`, `text`, `keys`: text fed to the program or to a running process, each checked
   as a line;
-- a shell's script, in argv or in a one-command line: `bash -c '…'` (and `-lc`), `cmd /c …`, and PowerShell's
-  `-Command` in any form PowerShell takes (`-c`, `-co`, … `-command`, `-CommandWithArgs`, with `-`, `--` or `/`)
-  are checked as the script too.
+- a shell's script, in argv or in a one-command line: `bash -c '…'` (and `-lc`), `cmd /c …` (also glued,
+  `/cnpm …`, `/C"…"`, and `/k`, `/r`), PowerShell's `-Command` in any form PowerShell takes (`-c`, `-co`, …
+  `-command`, `-CommandWithArgs`, with `-`, `--` or `/`), and Windows PowerShell's positional words, which it runs
+  as `-Command` (`powershell -NoProfile npm i x`), are checked as the script too.
 
 If any part cannot be read (a field of another type, a `commands` entry that is not a command, `bash -c` without
 its script, PowerShell's `-EncodedCommand` in any prefix or form: `-e`, `-ec`, `-enc`, `-encod`, `/enc`,
-`--encodedcommand`), the whole call asks the user. So does a named shell tool called with no command line.
+`--encodedcommand`, and a script file pwsh 7 runs from its first positional word), the whole call asks the user. So does a named shell tool called with no command line.
 
 **Which lines are sent.** Every line except one that only prints. A line stays in your process only when every
 command in it (split at `;`, `&&`, `||`, `|`, `&`) is `ls`, `pwd`, `cat`, `head`, `tail`, `wc`, `echo` or `printf`
-(not `printf -v`, which sets a variable), with plain quoting, and the line has no `$`, backtick, `<`, `>`,
+(not `printf -v`, which sets a variable), with no argument that starts with `//` (on Windows a network share,
+which sends your credentials to its host), with plain quoting, and the line has no `$`, backtick, `<`, `>`,
 parenthesis, brace, backslash, `!`, line break, tab or non-ASCII character. These programs only read the files they
 are given and print; a line of them installs nothing and runs nothing else. `git`, `grep` and `rg` are sent: `git
 status`, `git diff` and `git log` run what a repository's config names (`core.fsmonitor`, `diff.external`, a
@@ -225,8 +232,9 @@ The full statement: [alalanet.com/privacy](https://alalanet.com/privacy).
   200, as it answers a line with nothing to check: a web page must not spend a visitor's checks. So in a browser, a
   browser's worker, an extension or an Electron renderer (`document`, `window`, `chrome.runtime`, a service
   worker's `registration`, `WorkerGlobalScope`, `importScripts`, `process.type === "renderer"`) this package sends
-  nothing and every shell command asks: run the agent on a server. A server runtime is checked even with such
-  globals: Node (also with jsdom, happy-dom or linkedom putting `document` in the global scope), Deno, Bun, and
+  nothing and every shell command asks: run the agent on a server. The extension, service-worker, worker and
+  Electron marks are checked first, so a polyfilled `process` or a user agent string does not hide them. A server
+  runtime is checked even with the other globals: Node (also with jsdom, happy-dom or linkedom putting `document` in the global scope), Deno, Bun, and
   Cloudflare Workers (`navigator.userAgent` `Cloudflare-Workers`, whose fetch sends no `Origin`). alalanet will
   mark a real "nothing to check" with the header `Alalanet-Silence: nothing-to-check`. When an answer carries that
   header, it is the only empty answer that allows (another value asks); `requireSilenceMark: true` makes an

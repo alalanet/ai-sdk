@@ -16,8 +16,8 @@ test("PowerShell's -Command is read from any prefix, as a line or as argv", () =
     assert.ok(readCommands({ command: ["pwsh", "-NoProfile", f, "npm i evil-pkg"] }).lines.includes("npm i evil-pkg"), f);
     assert.ok(readCommands({ command: `pwsh -NoProfile ${f} 'npm i evil-pkg'` }).lines.includes("npm i evil-pkg"), `line ${f}`);
   }
-  // other parameters are not taken for -Command or -EncodedCommand
-  for (const f of ["-ConfigurationName", "-NoLogo", "-ExecutionPolicy", "-ex", "-ep"]) {
+  // parameters that take a value are skipped with it, and are not taken for -Command or -EncodedCommand
+  for (const f of ["-ConfigurationName", "-ExecutionPolicy", "-ex", "-ep"]) {
     const r = readCommands({ command: ["pwsh", f, "x"] });
     assert.deepEqual([r.lines.includes("x"), r.unread], [false, []], f);
   }
@@ -33,7 +33,7 @@ test("process tools and process fields: input, chars, data, text, keys are comma
     ["send_keys", { target: "%1", keys: "npm i evil-pkg" }],
     ["write_to_process", { data: "npm i evil-pkg\n" }],
     ["tmux_type", { processId: 7, text: "npm i evil-pkg" }],
-    ["anything", { sessionId: "x", data: "npm i evil-pkg" }],
+    ["pty_write", { sessionId: "x", data: "npm i evil-pkg" }],
     ["launch", { executable: "/usr/bin/npm", arguments: ["install", "evil-pkg"] }],
     ["launch", { program: "npx", args: ["-y", "evil-pkg"] }],
     ["bash", { command: "bash", input: "npm i evil-pkg" }],
