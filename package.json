@@ -1,6 +1,6 @@
 {
   "name": "@alalanet/ai-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Asks alalanet before a Vercel AI SDK agent runs an install command or pays an x402 endpoint, in the SDK's toolApproval: a blocked package (known malicious, typosquat, a name that does not exist) is denied with the reason, a held one waits for the user, and a failed check never lets the command run unasked. Also installCheck, preflightPayment and checkRepoConfig tools.",
   "type": "module",
   "main": "index.js",
@@ -54,7 +54,7 @@
     "preflight",
     "alalanet"
   ],
-  "homepage": "https://alalanet.com/docs/ai-sdk",
+  "homepage": "https://github.com/alalanet/ai-sdk#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/alalanet/ai-sdk.git"

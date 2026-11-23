@@ -1,7 +1,7 @@
 // The calls to alalanet that the approval and the tools share: the install hook for a shell command, install_check,
 // preflight and check_repo_config. No dependency besides fetch.
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.1.1";
 const API = "https://alalanet.com";
 // The hook route reads at most 1 MiB; a larger command is held here, never sent (the server would ask anyway).
 const HOOK_BODY_MAX = 1 << 20;
