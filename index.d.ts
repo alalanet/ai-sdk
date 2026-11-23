@@ -10,7 +10,7 @@ export interface AlalanetCallOptions {
   deviceKey?: string;
   /** per request to alalanet, default 20000 */
   timeoutMs?: number;
-  /** an empty answer of the hook allows only with Alalanet-Silence: nothing-to-check (default false until alalanet sends that header) */
+  /** an empty answer of the hook allows only with Alalanet-Silence: nothing-to-check (default true; false, or ALALANET_REQUIRE_SILENCE_MARK=0, for a self-hosted alalanet older than the mark) */
   requireSilenceMark?: boolean;
   fetch?: typeof globalThis.fetch;
   /** put in front of this package's User-Agent */
@@ -97,7 +97,7 @@ export interface CommandVerdict {
   notChecked?: string;
 }
 
-/** One command line to alalanet's install hook (POST /v1/hooks/claude-code). Never throws. */
+/** One command line to alalanet's install hook (POST /v1/hooks/command; an older alalanet at /v1/hooks/claude-code). Never throws. */
 export function checkCommand(command: string, opts?: AlalanetCallOptions): Promise<CommandVerdict>;
 
 export interface PreflightVerdict {

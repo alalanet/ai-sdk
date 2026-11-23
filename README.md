@@ -193,7 +193,7 @@ names the signed statement, `full: true` returns the whole answer). An error com
 | `shellTools` | `DEFAULT_SHELL_TOOLS` | tool names, or `{ name: (input) => line \| lines }` |
 | `detectCommandInput` | `true` | any tool with a command line in `command`, `cmd`, `commandLine`, `command_line` or `script` counts as a shell |
 | `prefilter` | `true` | `true`: send every line but those that only print (see above); `false`: every line; a function `(line) => boolean`: your own test |
-| `requireSilenceMark` | `false` | an empty answer allows only with `Alalanet-Silence: nothing-to-check` (see below) |
+| `requireSilenceMark` | `true` | an empty answer allows only with `Alalanet-Silence: nothing-to-check` (see below); `false`, or `ALALANET_REQUIRE_SILENCE_MARK=0`, for a self-hosted alalanet older than the mark |
 | `paymentTools` | none | tool names, or `{ name: (input) => url \| { url, paymentRequired?, maxUsd? } }` |
 | `maxUsdPerCall` | none | `max_usd` for preflight, in US dollars |
 | `onHold` | `"ask"` | `"deny"`: deny a hold instead of asking |
@@ -213,7 +213,7 @@ for your own policy.
 ## What is sent to alalanet, and what it keeps
 
 - **A shell command.** Every line but those that only print (above), whole, as typed, in one request
-  `POST https://alalanet.com/v1/hooks/claude-code` as
+  `POST https://alalanet.com/v1/hooks/command` (an alalanet older than that name is asked at `/v1/hooks/claude-code`) as
   `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"…"}}`, the same request
   alalanet's other install hooks send, with the User-Agent `alalanet-ai-sdk/<version> (hook)`. The tool's
   other input, its output, your messages and prompts are never sent. A line over 1 MiB is not sent; it asks.
@@ -245,10 +245,11 @@ The full statement: [alalanet.com/privacy](https://alalanet.com/privacy).
   nothing and every shell command asks: run the agent on a server. The extension, service-worker, worker and
   Electron marks are checked first, so a polyfilled `process` or a user agent string does not hide them. A server
   runtime is checked even with the other globals: Node (also with jsdom, happy-dom or linkedom putting `document` in the global scope), Deno, Bun, and
-  Cloudflare Workers (`navigator.userAgent` `Cloudflare-Workers`, whose fetch sends no `Origin`). alalanet will
-  mark a real "nothing to check" with the header `Alalanet-Silence: nothing-to-check`. When an answer carries that
-  header, it is the only empty answer that allows (another value asks); `requireSilenceMark: true` makes an
-  unmarked empty answer ask everywhere, and will be the default once the server sends the mark.
+  Cloudflare Workers (`navigator.userAgent` `Cloudflare-Workers`, whose fetch sends no `Origin`). alalanet marks
+  a real "nothing to check" with the header `Alalanet-Silence: nothing-to-check`, and only that empty answer allows:
+  an empty answer without the mark, or with another value, asks (`NOT CHECKED`). For a self-hosted alalanet older
+  than the mark, turn this off with `requireSilenceMark: false` or `ALALANET_REQUIRE_SILENCE_MARK=0` (the option wins
+  over the variable).
 - An answer over 1 MiB is not read: the command asks, a tool gets `answer_too_large`.
 
 Node 22+ (as `ai` 7), Bun, Deno, Cloudflare Workers; `ai` 7.0.178 or later (earlier 7.x versions signed the approval

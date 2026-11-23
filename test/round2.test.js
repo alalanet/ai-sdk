@@ -108,7 +108,24 @@ test("prefilter: false sends every line, a function decides itself, an error in 
 const reply = (body, headers = {}) => async () => new Response(body, { status: 200, headers });
 
 test("silence allows only when it can be trusted", async () => {
-  assert.equal((await checkCommand("npx q", { fetch: reply("") })).decision, "allow");
+  // an unmarked empty 200 asks by default; off for a server older than the mark, by the option or the variable
+  const plain = await checkCommand("npx q", { fetch: reply("") });
+  assert.deepEqual([plain.decision, plain.notChecked], ["ask", "silence"]);
+  assert.equal((await checkCommand("npx q", { fetch: reply(""), requireSilenceMark: false })).decision, "allow");
+  const had = process.env.ALALANET_REQUIRE_SILENCE_MARK;
+  try {
+    for (const off of ["0", "false", "No", "off"]) {
+      process.env.ALALANET_REQUIRE_SILENCE_MARK = off;
+      assert.equal((await checkCommand("npx q", { fetch: reply("") })).decision, "allow", off);
+    }
+    process.env.ALALANET_REQUIRE_SILENCE_MARK = "1";
+    assert.equal((await checkCommand("npx q", { fetch: reply("") })).decision, "ask");
+    process.env.ALALANET_REQUIRE_SILENCE_MARK = "0";
+    assert.equal((await checkCommand("npx q", { fetch: reply(""), requireSilenceMark: true })).decision, "ask"); // the option wins
+  } finally {
+    if (had === undefined) delete process.env.ALALANET_REQUIRE_SILENCE_MARK;
+    else process.env.ALALANET_REQUIRE_SILENCE_MARK = had;
+  }
   assert.equal((await checkCommand("npx q", { fetch: reply("", { "alalanet-silence": "nothing-to-check" }) })).decision, "allow");
   const odd = await checkCommand("npx q", { fetch: reply("", { "alalanet-silence": "browser" }) });
   assert.deepEqual([odd.decision, odd.notChecked], ["ask", "silence"]);
@@ -134,7 +151,7 @@ test("in a browser, a browser's worker or an extension nothing is sent and the c
 test("server runtimes are checked: Node with a global document (jsdom and the like), workerd, Deno, Bun", async () => {
   const sent = async (run) => {
     let asked = 0;
-    const r = await run(async () => ((asked += 1), new Response("")));
+    const r = await run(async () => ((asked += 1), new Response("", { headers: { "alalanet-silence": "nothing-to-check" } })));
     return [r.decision, asked];
   };
   // Node with jsdom's globals: process is there, so the line is sent
@@ -182,4 +199,19 @@ test("an answer over 1 MiB is not read: the command asks, the tool gets an error
   // a body without a stream reader is capped too
   const r2 = await checkCommand("npx q", { fetch: async () => ({ status: 200, headers: new Headers(), text: async () => " ".repeat((1 << 20) + 1) }) });
   assert.equal(r2.notChecked, "bad_answer");
+});
+
+test("an alalanet older than POST /v1/hooks/command is asked under the hook's first name", async () => {
+  const fa = await fakeAlalanet();
+  try {
+    fa.state.legacyOnly = true;
+    const r = await checkCommand("npm i evil-pkg", { api: fa.api });
+    assert.equal(r.decision, "deny");
+    assert.deepEqual(fa.seen.map((s) => s.path), ["/v1/hooks/command", "/v1/hooks/claude-code"]);
+    fa.state.legacyOnly = false;
+    assert.equal((await checkCommand("npm i evil-pkg", { api: fa.api })).decision, "deny");
+    assert.equal(fa.seen.length, 3); // one request when the neutral name answers
+  } finally {
+    await fa.close();
+  }
 });

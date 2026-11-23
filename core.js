@@ -11,12 +11,17 @@ const REASON_MAX = 2000;
 const NOT_CHECKED_HEADER = "alalanet-not-checked";
 // An answer is read up to 1 MiB; a longer one is not read (and a command waits for the user).
 const ANSWER_MAX = 1 << 20;
-// The hook's empty 200 means "nothing to say", and also "a browser's request, ignored". alalanet is to mark the first
-// with Alalanet-Silence: nothing-to-check. Present, it is the only silence that allows; an empty 200 with another
-// value asks. Until the server sends it, an unmarked silence allows only outside browsers and extensions (below).
-// Set this to true (or opts.requireSilenceMark) once the server marks its silence: then an unmarked one asks too.
-export const REQUIRE_SILENCE_MARK = false;
+// The hook's empty 200 means "nothing to say", and also "a browser's request, ignored". alalanet marks the first with
+// Alalanet-Silence: nothing-to-check (since 2026-11-23), and only that silence allows: an empty 200 without the mark or
+// with another value asks. The default; for a self-hosted alalanet older than the mark, turn it off with
+// requireSilenceMark: false or ALALANET_REQUIRE_SILENCE_MARK=0 (the option wins over the variable).
+export const REQUIRE_SILENCE_MARK = true;
+const OFF = new Set(["0", "false", "no", "off"]);
 const SILENCE_HEADER = "alalanet-silence";
+// The install hook: its neutral name, and the first one, which an alalanet older than 2026-11-23 alone answers (a 404
+// on the neutral name is asked once more there: the same hook, quota and answers).
+export const HOOK_PATH = "/v1/hooks/command";
+const LEGACY_HOOK_PATH = "/v1/hooks/claude-code";
 const SILENCE_OK = "nothing-to-check";
 
 export function settings(opts = {}) {
@@ -27,7 +32,9 @@ export function settings(opts = {}) {
   const env = typeof process !== "undefined" && process.env ? process.env : {};
   const token = opts.token ?? env.ALALANET_TOKEN ?? "";
   const deviceKey = opts.deviceKey ?? env.ALALANET_DEVICE_KEY ?? "";
-  return { api, call, ua, timeoutMs, token, deviceKey, plainRemote: plainRemote(api) };
+  const markEnv = String(env.ALALANET_REQUIRE_SILENCE_MARK ?? "").trim().toLowerCase();
+  const requireSilenceMark = typeof opts.requireSilenceMark === "boolean" ? opts.requireSilenceMark : markEnv !== "" ? !OFF.has(markEnv) : REQUIRE_SILENCE_MARK;
+  return { api, call, ua, timeoutMs, token, deviceKey, requireSilenceMark, plainRemote: plainRemote(api) };
 }
 
 // Plain http to another machine: a token or a device key is never sent there in the clear.
@@ -120,7 +127,7 @@ export function browserLike() {
 }
 
 /**
- * Asks alalanet about one shell command line, as alalanet's install hooks do (POST /v1/hooks/claude-code).
+ * Asks alalanet about one shell command line, as alalanet's install hooks do (POST /v1/hooks/command).
  * Returns { decision: "allow" | "deny" | "ask", reason, checked, notChecked? }:
  * - allow: alalanet had nothing to say (no install in the line, or every install allowed);
  * - deny: alalanet blocks an install in it;
@@ -145,7 +152,9 @@ async function askHook(command, opts) {
   if (browserLike()) return notChecked("browser", "alalanet's install hook does not answer a browser's or an extension's request; run the agent on a server");
   let res, text;
   try {
-    ({ res, text } = await request(s, "/v1/hooks/claude-code", { method: "POST", headers: headers(s, "hook", true), body }));
+    ({ res, text } = await request(s, HOOK_PATH, { method: "POST", headers: headers(s, "hook", true), body }));
+    // an alalanet without the neutral name: the same hook under its first name
+    if (res.status === 404) ({ res, text } = await request(s, LEGACY_HOOK_PATH, { method: "POST", headers: headers(s, "hook", true), body }));
   } catch (e) {
     if (e instanceof AnswerTooLarge) return notChecked("bad_answer", e.message);
     return notChecked("unreachable", `alalanet could not be reached (${shown(e?.name === "AbortError" ? "timeout" : e?.message || e, 200)})`);
@@ -157,7 +166,7 @@ async function askHook(command, opts) {
       if (mark.trim().toLowerCase() === SILENCE_OK) return { decision: "allow", reason: "", checked: true };
       return notChecked("silence", `alalanet answered with silence marked ${shown(mark, 40)}`);
     }
-    if (REQUIRE_SILENCE_MARK || opts.requireSilenceMark) return notChecked("silence", "alalanet's silence carried no mark that it had nothing to check");
+    if (s.requireSilenceMark) return notChecked("silence", "alalanet's silence carried no mark that it had nothing to check");
     return { decision: "allow", reason: "", checked: true };
   }
   let out;

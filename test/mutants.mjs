@@ -35,7 +35,10 @@ const mutants = [
   { name: "F3: an unread part of the call is dropped", file: "approval.js", from: "if (unread.length) {", to: "if (false) {" },
   // F4: silence
   { name: "F4: a browser or an extension is not detected", file: "core.js", from: "if (browserLike()) return notChecked(", to: "if (false) return notChecked(" },
-  { name: "F4: requireSilenceMark is ignored", file: "core.js", from: "if (REQUIRE_SILENCE_MARK || opts.requireSilenceMark) return", to: "if (REQUIRE_SILENCE_MARK) return" },
+  { name: "F4: requireSilenceMark is ignored", file: "core.js", from: "if (s.requireSilenceMark) return", to: "if (false) return" },
+  { name: "the hook's first name is not asked after a 404", file: "core.js", from: "if (res.status === 404) ({ res, text }", to: "if (false) ({ res, text }" },
+  { name: "F4: the mark is not required by default", file: "core.js", from: "export const REQUIRE_SILENCE_MARK = true;", to: "export const REQUIRE_SILENCE_MARK = false;" },
+  { name: "F4: the off switch is not read", file: "core.js", from: "markEnv !== \"\" ? !OFF.has(markEnv) : REQUIRE_SILENCE_MARK", to: "REQUIRE_SILENCE_MARK" },
   { name: "F4: any silence mark allows", file: "core.js", from: "if (mark.trim().toLowerCase() === SILENCE_OK) return", to: "if (true) return" },
   // F6: names and fields
   { name: "F6: shell names compare with case and _", file: "approval.js", from: 'export const normalName = (n) => String(n ?? "").toLowerCase().replace(/[-_]/g, "");', to: 'export const normalName = (n) => String(n ?? "");' },
