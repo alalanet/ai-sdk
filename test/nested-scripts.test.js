@@ -1,4 +1,4 @@
-// The review's round-4 attack tests (D-1 to D-3), kept as tests of the fixes.
+// Compound, wrapped and nested PowerShell and cmd lines, whole-word tool names, and browserLike's order of checks.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -14,8 +14,8 @@ const ctx = (toolName, input) => ({ toolCall: { toolName, toolCallId: toolName +
 const type = (s) => (s === undefined ? "not-applicable" : typeof s === "string" ? s : s.type);
 const SCRIPT = "npm i evil-pkg";
 
-test("D-1 compound, wrapped and nested PowerShell and cmd lines: the script is read", () => {
-  const { lines } = JSON.parse(readFileSync(new URL("./fixtures/server-acts-r5.json", import.meta.url), "utf8"));
+test("compound, wrapped and nested PowerShell and cmd lines: the script is read", () => {
+  const { lines } = JSON.parse(readFileSync(new URL("./fixtures/server-acts-nested-scripts.json", import.meta.url), "utf8"));
   assert.equal(lines.length, 13);
   for (const { line } of lines) {
     const r = readCommands({ command: line });
@@ -40,7 +40,7 @@ test("D-1 compound, wrapped and nested PowerShell and cmd lines: the script is r
   assert.ok(readCommands({ command: deep }).unread.some((u) => /nested/.test(u)));
 });
 
-test("D-1b through the approval: a blocked script inside a compound, wrapped or nested line is denied", async () => {
+test("through the approval: a blocked script inside a compound, wrapped or nested line is denied", async () => {
   const fetch = async (url, init) => {
     const line = JSON.parse(init.body).tool_input.command;
     // as the real reader on these lines: silent on the compound line, a block on the bare script
@@ -53,7 +53,7 @@ test("D-1b through the approval: a blocked script inside a compound, wrapped or 
   }
 });
 
-test("D-2 the name rule matches whole words; a pid or a terminal id with text is a process's input", async () => {
+test("the name rule matches whole words; a pid or a terminal id with text is a process's input", async () => {
   const a = alalanetApproval({ api: fa.api });
   for (const [name, input] of [["do", { pid: 1, input: SCRIPT }], ["bash_tool", { pid: 1, input: SCRIPT }], ["send", { terminalId: 3, text: `${SCRIPT}\n` }], ["replInput", { sessionId: "s", text: SCRIPT }], ["screen_stuff", { text: SCRIPT }], ["send_command", { session_id: "s", text: SCRIPT }], ["consoleWrite", { data: SCRIPT }]]) {
     assert.equal(type(await a(ctx(name, input))), "denied", name);
@@ -70,7 +70,7 @@ test("D-2 the name rule matches whole words; a pid or a terminal id with text is
   assert.equal(fa.hooks().length, n0, "nothing sent");
 });
 
-test("D-3 browserLike after the reorder", () => {
+test("browserLike after the reorder", () => {
   assert.equal(asRuntime({ chrome: { runtime: { id: "abc" } }, process: { versions: { node: "22" } } }, browserLike), true);
   assert.equal(browserLike(), false);
 });

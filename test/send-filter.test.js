@@ -1,5 +1,5 @@
-// Review round 2: every line alalanet's reader acts on is sent; argv, args and stdin shapes are read whole; a part
-// that cannot be read asks; silence allows only where it can be trusted; preflight and the answer reader never throw.
+// Every line alalanet's reader acts on is sent; argv, args and stdin shapes are read whole; a part that cannot be read
+// asks; silence allows only where it can be trusted; preflight and the answer reader never throw.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -15,8 +15,8 @@ const call = (toolName, input, toolCallId = "c1") => ({ toolCall: { type: "tool-
 const type = (s) => (s === undefined ? "not-applicable" : typeof s === "string" ? s : s.type);
 const sentSince = (n) => fa.hooks().slice(n).map((h) => JSON.parse(h.body).tool_input.command);
 
-test("every line of the review's three corpora that alalanet's reader acts on is sent", () => {
-  for (const [f, size] of [["server-acts.json", 104], ["server-acts-r2.json", 163], ["server-acts-r3.json", 18], ["server-acts-r4.json", 22]]) {
+test("every line of the recorded corpora that alalanet's reader acts on is sent", () => {
+  for (const [f, size] of [["server-acts.json", 104], ["server-acts-shapes.json", 163], ["server-acts-powershell-prefixes.json", 18], ["server-acts-positional-and-glued.json", 22]]) {
     const { lines } = JSON.parse(readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8"));
     assert.equal(lines.length, size, f);
     const missed = lines.filter((l) => l.acts && !mustSend(l.line)).map((l) => l.line);

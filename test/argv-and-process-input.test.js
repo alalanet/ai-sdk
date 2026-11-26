@@ -1,5 +1,5 @@
-// The review's round-2 attack tests (B-1 to B-6), kept as tests of the fixes: each first proved a gap, each now
-// proves it closed.
+// argv and spawn shapes, text written into a running process, pwsh -EncodedCommand, the read-only list, a global
+// document in a server process, and prototype keys in JSON input.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -17,7 +17,7 @@ const ctx = (toolName, input) => ({ toolCall: { toolName, toolCallId: JSON.strin
 const type = (s) => (s === undefined ? "not-applicable" : typeof s === "string" ? s : s.type);
 const sentSince = (n) => fa.hooks().slice(n).map((h) => JSON.parse(h.body).tool_input.command);
 
-test("B-1 {command:'npm install', args:[pkg]} is sent as argv and as the line a shell:true tool runs", async () => {
+test("{command:'npm install', args:[pkg]} is sent as argv and as the line a shell:true tool runs", async () => {
   const { lines, unread } = readCommands({ command: "npm install", args: ["evil-pkg"] });
   assert.deepEqual([lines, unread], [["'npm install' evil-pkg", "npm install evil-pkg"], []]);
   // what a tool with spawn's shell: true runs is the second line
@@ -40,7 +40,7 @@ test("B-1 {command:'npm install', args:[pkg]} is sent as argv and as the line a 
   assert.deepEqual(sent, ["'npm install' evil-pkg", "npm install evil-pkg"]);
 });
 
-test("B-2 text written into a running process, and a spawn tool's {file, args}, are checked", async () => {
+test("text written into a running process, and a spawn tool's {file, args}, are checked", async () => {
   const a = alalanetApproval({ api: fa.api });
   let n = fa.hooks().length;
   assert.equal(type(await a(ctx("interact_with_process", { pid: 4242, input: "npm i evil-pkg" }))), "denied");
@@ -52,7 +52,7 @@ test("B-2 text written into a running process, and a spawn tool's {file, args}, 
   assert.deepEqual(sentSince(n), ["npm i evil-pkg"]);
 });
 
-test("B-3 every prefix and form of pwsh -EncodedCommand is read as encoded, and the call asks", async () => {
+test("every prefix and form of pwsh -EncodedCommand is read as encoded, and the call asks", async () => {
   for (const f of ["-e", "-ec", "-en", "-enc", "-encod", "-encode", "-encoded", "-EncodedC", "-encodedcommand", "--encodedcommand", "/enc", "/EncodedCommand"]) {
     assert.ok(readCommands({ command: ["pwsh", f, "SQBFAFgA"] }).unread.length > 0, f);
     assert.ok(readCommands({ command: `powershell ${f} SQBFAFgA` }).unread.length > 0, `line ${f}`);
@@ -60,13 +60,13 @@ test("B-3 every prefix and form of pwsh -EncodedCommand is read as encoded, and 
   assert.equal(type(await alalanetApproval({ api: fa.api })(ctx("shell", { command: ["pwsh", "-encod", "SQBFAFgA"] }))), "user-approval");
 });
 
-test("B-4 rg, grep, git and printf -v are no longer kept local", () => {
+test("rg, grep, git and printf -v are no longer kept local", () => {
   const lines = ["rg --hostname-bin=./evil --hyperlink-format=default TODO", "rg -iz TODO", "rg TODO *", "git status", "git diff", "git log -p", "git log -1 --outp=/tmp/x", "printf -v PATH /tmp/evil:/usr/bin"];
   for (const l of lines) assert.equal(isReadOnly(l), false, l);
   for (const l of ["rg --pre=sh TODO", "rg -z TODO", "git log --output=/tmp/x", "git -c core.pager=x log", "git diff --ext-diff"]) assert.equal(isReadOnly(l), false, l);
 });
 
-test("B-5 a global document in a server process (jsdom, happy-dom, linkedom) does not stop the check", async () => {
+test("a global document in a server process (jsdom, happy-dom, linkedom) does not stop the check", async () => {
   globalThis.document = {};
   try {
     const n = fa.hooks().length;
@@ -78,7 +78,7 @@ test("B-5 a global document in a server process (jsdom, happy-dom, linkedom) doe
   }
 });
 
-test("B-6 prototype keys and odd shapes from JSON", async () => {
+test("prototype keys and odd shapes from JSON", async () => {
   const a = alalanetApproval({ api: fa.api });
   const input = JSON.parse('{"__proto__":{"command":"npm i evil-pkg"}}');
   assert.equal(type(await a(ctx("bash", input))), "user-approval"); // a named shell with nothing readable asks

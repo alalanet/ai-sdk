@@ -1,5 +1,5 @@
 {
- "about": "Lines (the review's round-4 lines: PowerShell positional, cmd glued, bash valued options, argv joins) and whether alalanet's install reader acts on them (installread.ParseLine + HookExtra at alalanetd 32524701), from the review differential of 2026-11-22. Every line it acts on must be sent.",
+ "about": "Lines with PowerShell's positional script, cmd's glued switch, bash's valued options and argv joins, and whether alalanet's install reader acts on them (installread.ParseLine + HookExtra at alalanetd 32524701). Every line it acts on must be sent.",
  "lines": [
   {
    "line": "powershell npm i evil-pkg",

@@ -1,4 +1,5 @@
-// The review's round-3 attack tests (C-1 to C-5), kept as tests of the fixes.
+// The two-line rule for argv arguments, PowerShell, bash and cmd script forms, terminal tools, worker and extension
+// marks, and network shares in the read-only list.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { alalanetApproval, readCommands, isReadOnly, shellScript } from "../index.js";
@@ -12,14 +13,14 @@ after(() => fa.close());
 const ctx = (toolName, input) => ({ toolCall: { toolName, toolCallId: toolName + JSON.stringify(input), input }, tools: {}, toolsContext: {}, messages: [] });
 const type = (s) => (s === undefined ? "not-applicable" : typeof s === "string" ? s : s.type);
 
-test("C-1 the two-line rule reads an argv argument as shell too: the safe direction (kept, R3-6)", () => {
+test("the two-line rule reads an argv argument as shell too: the safe direction", () => {
   const r = readCommands({ command: "git", args: ["commit", "-m", "x && npm i evil-pkg"] });
-  // the joined line's parts are judged too (round 5)
+  // the joined line's parts are judged too
   assert.deepEqual(r.lines, ["git commit -m 'x && npm i evil-pkg'", "git commit -m x && npm i evil-pkg", "git commit -m x", "npm i evil-pkg"]);
   assert.deepEqual(readCommands({ command: ["bash", "-lc", "npm i evil-pkg"] }).lines, ["bash -lc 'npm i evil-pkg'", "npm i evil-pkg", "bash -lc npm i evil-pkg", "npm"]);
 });
 
-test("C-2 PowerShell: every parameter form, and Windows PowerShell's positional -Command", () => {
+test("PowerShell: every parameter form, and Windows PowerShell's positional -Command", () => {
   const out = {};
   for (const f of ["-c", "-co", "-con", "-config", "-cwa", "-CommandWithArgs", "-commandw", "-e", "-ex", "-ep", "/enc", "--encodedcommand", "-f", "-File"]) {
     // the argv as PowerShell reads it (the joined line of the same argv is read as well, and asks for some)
@@ -48,18 +49,18 @@ test("C-2 PowerShell: every parameter form, and Windows PowerShell's positional 
   for (const input of [{ command: ["pwsh", "npm", "i", "evil-pkg"] }, { command: "pwsh -NoProfile ./setup.ps1" }]) assert.ok(readCommands(input).unread.length > 0, JSON.stringify(input));
 });
 
-test("C-2c bash options with a value before -c", () => {
+test("bash options with a value before -c", () => {
   assert.ok(readCommands({ command: ["bash", "--rcfile", "x", "-c", "npm i evil-pkg"] }).lines.includes("npm i evil-pkg"));
   assert.ok(readCommands({ command: "bash -o pipefail -lc 'npm i evil-pkg'" }).lines.includes("npm i evil-pkg"));
 });
 
-test("C-2b cmd's /c, /k, /r glued to the script", () => {
+test("cmd's /c, /k, /r glued to the script", () => {
   for (const input of [{ command: ["cmd", "/cnpm", "i", "evil-pkg"] }, { command: ["cmd", '/C"npm i evil-pkg"'] }, { command: ["cmd.exe", "/knpm i evil-pkg"] }, { command: ["cmd", "/rnpm", "i", "evil-pkg"] }, { command: "cmd /cnpm i evil-pkg" }, { command: 'cmd /C"npm i evil-pkg"' }]) {
     assert.ok(readCommands(input).lines.includes("npm i evil-pkg"), JSON.stringify(input));
   }
 });
 
-test("C-3 terminals are read; chat and voice tools with a session and a text are not", async () => {
+test("terminals are read; chat and voice tools with a session and a text are not", async () => {
   const a = alalanetApproval({ api: fa.api });
   for (const [name, input] of [
     ["send_to_terminal", { terminalId: 3, text: "npm i evil-pkg\n" }],
@@ -78,7 +79,7 @@ test("C-3 terminals are read; chat and voice tools with a session and a text are
   assert.equal(fa.hooks().length, n0, "nothing sent");
 });
 
-test("C-4 extension and worker marks win over a spoofed user agent or a process polyfill", () => {
+test("extension and worker marks win over a spoofed user agent or a process polyfill", () => {
   assert.equal(asRuntime({ chrome: { runtime: { id: "abcdefghijklmnop" } }, navigator: { userAgent: "Cloudflare-Workers" } }, browserLike), true);
   assert.equal(asRuntime({ chrome: { runtime: { id: "abc" } }, process: { versions: { node: "18.0.0" }, env: {} } }, browserLike), true);
   assert.equal(asRuntime({ registration: {}, navigator: { userAgent: "Cloudflare-Workers" } }, browserLike), true);
@@ -89,7 +90,7 @@ test("C-4 extension and worker marks win over a spoofed user agent or a process 
   assert.equal(browserLike(), false);
 });
 
-test("C-5 the read-only list: a network share is sent", () => {
+test("the read-only list: a network share is sent", () => {
   const rows = Object.fromEntries(["ls *", "cat -- -v", "printf %s -v", "printf -- -vX", "tail -f x", "echo hi | cat", "ls //evil.example/share", "cat //host/x", "cat 'a&b'", "echo \"x\"'y'"].map((l) => [l, isReadOnly(l)]));
   assert.deepEqual(rows, { "ls *": true, "cat -- -v": true, "printf %s -v": false, "printf -- -vX": false, "tail -f x": true, "echo hi | cat": true, "ls //evil.example/share": false, "cat //host/x": false, "cat 'a&b'": true, "echo \"x\"'y'": true });
 });

@@ -1,4 +1,5 @@
-// The review's attack tests (round 1), kept as tests of the fixes: each first proved a gap, each now proves it closed.
+// Tool-call shapes that could carry a command past the check: the whole line is sent, other shell tools and fields are
+// read, preflight answers of any shape, replayed approvals, parallel calls, and lines with literal tokens.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -30,7 +31,7 @@ function model(toolName, inputs) {
 const ctx = (toolName, input) => ({ toolCall: { toolName, toolCallId: "c1", input }, tools: {}, toolsContext: {}, messages: [] });
 const type = (s) => (s === undefined ? "not-applicable" : typeof s === "string" ? s : s.type);
 
-test("A-1 runCommand {cmd, args}: the whole line goes to alalanet, and the blocked install never runs", async () => {
+test("runCommand {cmd, args}: the whole line goes to alalanet, and the blocked install never runs", async () => {
   const ran = [];
   const runCommand = tool({
     inputSchema: z.object({ cmd: z.string(), args: z.array(z.string()).optional() }),
@@ -48,11 +49,11 @@ test("A-1 runCommand {cmd, args}: the whole line goes to alalanet, and the block
   assert.equal(type(await alalanetApproval({ api: fa.api })(ctx("run_command", { command: "bash", stdin: "npm i evil-pkg" }))), "denied");
 });
 
-test("A-2 a named shell's command plus a commands entry it cannot read: the call asks", async () => {
+test("a named shell's command plus a commands entry it cannot read: the call asks", async () => {
   assert.equal(type(await alalanetApproval({ api: fa.api })(ctx("shell", { command: "ls", commands: [{ command: "npm i evil-pkg" }] }))), "user-approval");
 });
 
-test("A-3 shell tools under other names with cmd / commandLine / script are checked", async () => {
+test("shell tools under other names with cmd / commandLine / script are checked", async () => {
   const a = alalanetApproval({ api: fa.api });
   for (const [name, input] of [["exec_command", { cmd: "npm i evil-pkg" }], ["run_in_terminal", { commandLine: "npm i evil-pkg" }], ["Bash", { cmd: "npm i evil-pkg" }], ["runBash", { script: "npm i evil-pkg" }]]) {
     assert.equal(type(await a(ctx(name, input))), "denied", name);
@@ -60,7 +61,7 @@ test("A-3 shell tools under other names with cmd / commandLine / script are chec
   assert.equal(type(await a(ctx("Bash", { command: "npm i evil-pkg" }))), "denied");
 });
 
-// A-4: lines that bash runs as an install (a fake npm on PATH logs what ran); every one is now sent
+// lines that bash runs as an install (a fake npm on PATH logs what ran); every one is sent
 const bypass = [
   "{npm,} install evil-pkg",
   "FAKEBIN/np? install evil-pkg",
@@ -68,8 +69,8 @@ const bypass = [
   "n\\\npm install evil-pkg",
   '$"npm" install evil-pkg',
   "shopt -s expand_aliases\nalias q=npm\nq install evil-pkg",
-  // the review's row ran xargs -I{} {} ...: GNU xargs replaces {} in the arguments, never in the program, so it ran
-  // nothing; the program goes through sh here
+  // xargs -I{} {} ... runs nothing: GNU xargs replaces {} in the arguments, never in the program; the program goes
+  // through sh here
   "echo mol | tr a-y b-z | xargs -I{} sh -c '{} install evil-pkg'",
   "echo bnBtIGluc3RhbGwgZXZpbC1wa2c= | base64 -d | sh",
   "node FAKEBIN/npm-cli.js install evil-pkg",
@@ -80,7 +81,7 @@ const bypass = [
   "corepack pnpm@9 add evil-pkg",
 ];
 const notRunHere = /mpip|pip3\.12|go1\.22|yarnpkg|corepack/; // programs this image does not have
-test("A-4 every line that bash runs as an install is sent", () => {
+test("every line that bash runs as an install is sent", () => {
   const bin = mkdtempSync(join(tmpdir(), "alalanet-fakebin-"));
   writeFileSync(join(bin, "npm"), `#!/bin/sh\necho "RAN npm $*" >> ${bin}/log\n`);
   chmodSync(join(bin, "npm"), 0o755);
@@ -107,14 +108,14 @@ test("A-4 every line that bash runs as an install is sent", () => {
   }
 });
 
-test("A-5 preflight never throws on a 200 whose options are not a list of objects", async () => {
+test("preflight never throws on a 200 whose options are not a list of objects", async () => {
   const fetch = async () => new Response(JSON.stringify({ decision: "allow", options: {} }), { status: 200 });
   assert.equal((await preflight({ url: "https://x.example/p" }, { fetch })).decision, "unchecked");
   const fetch2 = async () => new Response(JSON.stringify({ decision: "allow", options: [null] }), { status: 200 });
   assert.equal((await preflight({ url: "https://x.example/p" }, { fetch: fetch2 })).decision, "unchecked");
 });
 
-test("A-6 a client's replayed approval of a denied call: runs without the secret when the re-check is not checked (documented), refused with onUnchecked deny or with the secret", async () => {
+test("a client's replayed approval of a denied call: runs without the secret when the re-check is not checked (documented), refused with onUnchecked deny or with the secret", async () => {
   const replay = async (opts, secret) => {
     const ran = [];
     const runCommand = tool({ inputSchema: z.object({ command: z.string() }), execute: async ({ command }) => (ran.push(command), "ran") });
@@ -139,14 +140,14 @@ test("A-6 a client's replayed approval of a denied call: runs without the secret
   assert.match(String(signed.error), /signature/i);
 });
 
-test("A-7 parallel calls: the denied one never runs, the silent one runs", async () => {
+test("parallel calls: the denied one never runs, the silent one runs", async () => {
   const ran = [];
   const runCommand = tool({ inputSchema: z.object({ command: z.string() }), execute: async ({ command }) => (ran.push(command), "ran") });
   await generateText({ model: model("runCommand", [{ command: "npm i evil-pkg" }, { command: "npm i fine-pkg" }]), tools: { runCommand }, toolApproval: alalanetApproval({ api: fa.api }), stopWhen: isStepCount(3), prompt: "go" });
   assert.deepEqual(ran, ["npm i fine-pkg"]);
 });
 
-test("A-8 a line with a literal token is sent whole (the README says so); read-only lines are not sent", async () => {
+test("a line with a literal token is sent whole (the README says so); read-only lines are not sent", async () => {
   const before = fa.hooks().length;
   const line = 'curl -H "Authorization: Bearer sk-live-123" -d "$(cat body.json)" https://api.example.com/v1';
   await alalanetApproval({ api: fa.api })(ctx("bash", { command: line }));

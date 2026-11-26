@@ -1,5 +1,5 @@
 {
- "about": "Lines (the review's round-2 fixture plus 59 lines) and whether alalanet's install reader acts on them (installread.ParseLine + HookExtra at alalanetd 32524701), from the review differential of 2026-11-22. Every line it acts on must be sent.",
+ "about": "More lines (argv, args and stdin shapes and their neighbours) and whether alalanet's install reader acts on them (installread.ParseLine + HookExtra at alalanetd 32524701). Every line it acts on must be sent.",
  "lines": [
   {
    "line": "npm install evil-pkg",

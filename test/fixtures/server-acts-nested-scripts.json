@@ -1,5 +1,5 @@
 {
- "about": "Lines (the review's round-5 lines: compound, wrapped and nested PowerShell and cmd commands) and whether alalanet's install reader acts on them (installread.ParseLine + HookExtra at alalanetd 32524701; silent on all), from the review of 2026-11-22. The client must unpack the script of every one.",
+ "about": "Compound, wrapped and nested PowerShell and cmd commands, and whether alalanet's install reader acts on them (installread.ParseLine + HookExtra at alalanetd 32524701; silent on all). The client must unpack the script of every one.",
  "lines": [
   {
    "line": "cd /tmp && pwsh -comm 'npm i evil-pkg'",

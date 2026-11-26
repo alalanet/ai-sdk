@@ -1,5 +1,4 @@
-// Review round 3: shell-joined args, process input, PowerShell's parameter prefixes, server runtimes, a smaller
-// read-only list.
+// Shell-joined args, process input, PowerShell's parameter prefixes, server runtimes, a smaller read-only list.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { alalanetApproval, readCommands, isReadOnly } from "../index.js";
